@@ -9,37 +9,36 @@ DEFAULT_MIN_BIN_HEIGHT = 1e-3
 DEFAULT_MIN_DERIVATIVE = 1e-3
 
 
-def piecewise_rational_quadratic_transform(inputs, 
+def piecewise_rational_quadratic_transform(inputs,
                                            unnormalized_widths,
                                            unnormalized_heights,
                                            unnormalized_derivatives,
                                            inverse=False,
-                                           tails=None, 
+                                           tails=None,
                                            tail_bound=1.,
                                            min_bin_width=DEFAULT_MIN_BIN_WIDTH,
                                            min_bin_height=DEFAULT_MIN_BIN_HEIGHT,
                                            min_derivative=DEFAULT_MIN_DERIVATIVE):
-
     if tails is None:
         spline_fn = rational_quadratic_spline
         spline_kwargs = {}
     else:
         spline_fn = unconstrained_rational_quadratic_spline
         spline_kwargs = {
-            'tails': tails,
-            'tail_bound': tail_bound
+            "tails": tails,
+            "tail_bound": tail_bound
         }
 
     outputs, logabsdet = spline_fn(
-            inputs=inputs,
-            unnormalized_widths=unnormalized_widths,
-            unnormalized_heights=unnormalized_heights,
-            unnormalized_derivatives=unnormalized_derivatives,
-            inverse=inverse,
-            min_bin_width=min_bin_width,
-            min_bin_height=min_bin_height,
-            min_derivative=min_derivative,
-            **spline_kwargs
+        inputs=inputs,
+        unnormalized_widths=unnormalized_widths,
+        unnormalized_heights=unnormalized_heights,
+        unnormalized_derivatives=unnormalized_derivatives,
+        inverse=inverse,
+        min_bin_width=min_bin_width,
+        min_bin_height=min_bin_height,
+        min_derivative=min_derivative,
+        **spline_kwargs
     )
     return outputs, logabsdet
 
@@ -68,7 +67,7 @@ def unconstrained_rational_quadratic_spline(inputs,
     outputs = torch.zeros_like(inputs)
     logabsdet = torch.zeros_like(inputs)
 
-    if tails == 'linear':
+    if tails == "linear":
         unnormalized_derivatives = F.pad(unnormalized_derivatives, pad=(1, 1))
         constant = np.log(np.exp(1 - min_derivative) - 1)
         unnormalized_derivatives[..., 0] = constant
@@ -92,6 +91,7 @@ def unconstrained_rational_quadratic_spline(inputs,
     )
 
     return outputs, logabsdet
+
 
 def rational_quadratic_spline(inputs,
                               unnormalized_widths,
@@ -126,7 +126,7 @@ def rational_quadratic_spline(inputs,
     heights = F.softmax(unnormalized_heights, dim=-1)
     heights = min_bin_height + (1 - min_bin_height * num_bins) * heights
     cumheights = torch.cumsum(heights, dim=-1)
-    cumheights = F.pad(cumheights, pad=(1, 0), mode='constant', value=0.0)
+    cumheights = F.pad(cumheights, pad=(1, 0), mode="constant", value=0.0)
     cumheights = (top - bottom) * cumheights + bottom
     cumheights[..., 0] = bottom
     cumheights[..., -1] = top
@@ -145,7 +145,8 @@ def rational_quadratic_spline(inputs,
     input_delta = delta.gather(-1, bin_idx)[..., 0]
 
     input_derivatives = derivatives.gather(-1, bin_idx)[..., 0]
-    input_derivatives_plus_one = derivatives[..., 1:].gather(-1, bin_idx)[..., 0]
+    input_derivatives_plus_one = derivatives[...,
+                                             1:].gather(-1, bin_idx)[..., 0]
 
     input_heights = heights.gather(-1, bin_idx)[..., 0]
 
@@ -172,7 +173,8 @@ def rational_quadratic_spline(inputs,
         derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * root.pow(2)
                                                      + 2 * input_delta * theta_one_minus_theta
                                                      + input_derivatives * (1 - root).pow(2))
-        logabsdet = torch.log(derivative_numerator) - 2 * torch.log(denominator)
+        logabsdet = torch.log(derivative_numerator) - \
+            2 * torch.log(denominator)
 
         return outputs, -logabsdet
     else:
@@ -188,6 +190,7 @@ def rational_quadratic_spline(inputs,
         derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * theta.pow(2)
                                                      + 2 * input_delta * theta_one_minus_theta
                                                      + input_derivatives * (1 - theta).pow(2))
-        logabsdet = torch.log(derivative_numerator) - 2 * torch.log(denominator)
+        logabsdet = torch.log(derivative_numerator) - \
+            2 * torch.log(denominator)
 
         return outputs, logabsdet

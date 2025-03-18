@@ -1,59 +1,52 @@
-from scipy.io import wavfile
-import matplotlib.pyplot as plt
-
 import os
-import json
-import math
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+
 import torch
-from torch import nn
-from torch.nn import functional as F
-from torch.utils.data import DataLoader
+import torch.nn as nn
+import torch.nn.functional as F
+from scipy.io import wavfile
 
-import commons
 import utils
-from data_utils import TextAudioLoader, TextAudioCollate, TextAudioSpeakerLoader, TextAudioSpeakerCollate
-from models import SynthesizerTrn
-from text.symbols import symbols
+import commons
 from text import text_to_sequence
-
-from scipy.io.wavfile import write
-
-# device = torch.device("cpu")
-# model.to(device)
+from text.symbols import symbols
+from models import SynthesizerTrn
 
 
 def get_text(text, hps):
+    # type(text_norm)=list, len(text_norm)=99
     text_norm = text_to_sequence(text, hps.data.text_cleaners)
     if hps.data.add_blank:
+        # 在文本开头增加一个空白符，每个音素后面增加一个空白符
+        # len(text_norm)=199
         text_norm = commons.intersperse(text_norm, 0)
-    text_norm = torch.LongTensor(text_norm)
+    text_norm = torch.LongTensor(text_norm)  # text_norm.shape=[199]
+
     return text_norm
 
 
-hps = utils.get_hparams_from_file("./configs/woman_csmsc.json")
+if __name__ == "__main__":
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-net_g = SynthesizerTrn(
-    len(symbols),
-    hps.data.filter_length // 2 + 1,
-    hps.train.segment_size // hps.data.hop_length,
-    **hps.model).cuda()
-_ = net_g.eval()
+    hps = utils.get_hparams_from_file("./configs/woman_csmsc.json")
+    # stn_tst 是文本转换为symbol的数字序列。长度为音素数量
+    stn_tst = get_text("第一，南京不是发展的不行，是大家对他期望很高。", hps)
 
-_ = utils.load_checkpoint("./logs/woman_csmsc/G_100000.pth", net_g, None)
+    net_g = SynthesizerTrn(len(symbols),  # 178
+                           hps.data.filter_length // 2 + 1,  # 1024//2+1=513
+                           hps.train.segment_size // hps.data.hop_length,  # 8192//256=32
+                           **hps.model).to(device)
+    net_g.eval()
+    _ = utils.load_checkpoint("./logs/woman_csmsc/G_100000.pth", net_g, None)
 
+    with torch.no_grad():
+        # Prepare data
+        x_tst = stn_tst.to(device).unsqueeze(0)  # x_tst.size()=[1, 199]
+        x_tst_lengths = torch.LongTensor([x_tst.size(1)]).to(
+            device)  # x_tst_lengths.size()=[1]
 
-stn_tst = get_text("第一，南京不是发展的不行，是大家对他期望很高，", hps)
-with torch.no_grad():
-    x_tst = stn_tst.cuda().unsqueeze(0)
-    x_tst_lengths = torch.LongTensor([stn_tst.size(0)]).cuda()
+        audio = net_g.infer(
+            x_tst, x_tst_lengths, noise_scale=0.667, noise_scale_w=0.8, length_scale=1)[0][0, 0].data.cpu().float().numpy()
 
-    # x_tst = stn_tst.cpu().unsqueeze(0)
-    # x_tst_lengths = torch.LongTensor([stn_tst.size(0)]).cpu()
-
-    audio = net_g.infer(x_tst, x_tst_lengths, noise_scale=.667, noise_scale_w=0.8, length_scale=1)[
-        0][0, 0].data.cpu().float().numpy()
-
-
-sampling_rate = 24000
-wavfile.write('abc1.wav', sampling_rate, audio)
-# ipd.display(ipd.Audio(audio, rate=hps.data.sampling_rate, normalize=False))
+    sample_rate = 24000
+    wavfile.write("abc1.wav", sample_rate, audio)

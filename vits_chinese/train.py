@@ -1,38 +1,25 @@
 import os
-import json
-import argparse
-import itertools
-import math
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+
 import torch
-from torch import nn, optim
-from torch.nn import functional as F
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+import torch.optim as optim
 import torch.multiprocessing as mp
+import torch.nn.functional as F
 import torch.distributed as dist
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import (DataLoader)
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import (GradScaler, autocast)
 
-import commons
+
 import utils
+import commons
 from data_utils import (
-    TextAudioLoader,
-    TextAudioCollate,
-    DistributedBucketSampler
-)
-from models import (
-    SynthesizerTrn,
-    MultiPeriodDiscriminator,
-)
-from losses import (
-    generator_loss,
-    discriminator_loss,
-    feature_loss,
-    kl_loss
-)
-from mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+    TextAudioLoader, TextAudioCollate, DistributedBucketSampler)
+from models import (SynthesizerTrn, MultiPeriodDiscriminator)
 from text.symbols import symbols
-
+from mel_processing import (mel_spectrogram_torch, spec_to_mel_torch)
+from losses import (generator_loss, discriminator_loss, feature_loss, kl_loss)
 
 torch.backends.cudnn.benchmark = True
 global_step = 0
@@ -40,14 +27,14 @@ global_step = 0
 
 def main():
     """Assume Single Node Multi GPUs Training Only"""
-    assert torch.cuda.is_available(), "CPU training is not allowed."
-
     n_gpus = torch.cuda.device_count()
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '80000'
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "1046"
 
     hps = utils.get_hparams()
-    mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
+    # mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps))
+
+    run(0, 1, hps)
 
 
 def run(rank, n_gpus, hps):
@@ -61,7 +48,7 @@ def run(rank, n_gpus, hps):
             log_dir=os.path.join(hps.model_dir, "eval"))
 
     dist.init_process_group(
-        backend='nccl', init_method='env://', world_size=n_gpus, rank=rank)
+        backend="gloo", init_method="env://", world_size=n_gpus, rank=rank)
     torch.manual_seed(hps.train.seed)
     torch.cuda.set_device(rank)
 
@@ -73,18 +60,16 @@ def run(rank, n_gpus, hps):
         # [700,800,900],  #70 test
         [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200,
             1300, 1400, 1500, 1600, 1700, 1800, 1900],  # csmsc
-
         num_replicas=n_gpus,
         rank=rank,
         shuffle=True)
     collate_fn = TextAudioCollate()
-    train_loader = DataLoader(train_dataset, num_workers=8, shuffle=False, pin_memory=True,
-                              collate_fn=collate_fn, batch_sampler=train_sampler)
+    train_loader = DataLoader(train_dataset, num_workers=8, shuffle=False,
+                              batch_sampler=train_sampler, pin_memory=True, collate_fn=collate_fn)
     if rank == 0:
         eval_dataset = TextAudioLoader(hps.data.validation_files, hps.data)
         eval_loader = DataLoader(eval_dataset, num_workers=8, shuffle=False,
-                                 batch_size=hps.train.batch_size, pin_memory=True,
-                                 drop_last=False, collate_fn=collate_fn)
+                                 batch_size=hps.train.batch_size, pin_memory=True, collate_fn=collate_fn, drop_last=False)
 
     net_g = SynthesizerTrn(
         len(symbols),
@@ -92,7 +77,7 @@ def run(rank, n_gpus, hps):
         hps.train.segment_size // hps.data.hop_length,
         **hps.model).cuda(rank)
     net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
-    optim_g = torch.optim.AdamW(
+    optim_g = optim.AdamW(
         net_g.parameters(),
         hps.train.learning_rate,
         betas=hps.train.betas,
@@ -106,8 +91,8 @@ def run(rank, n_gpus, hps):
     net_d = DDP(net_d, device_ids=[rank])
 
     try:
-        _, _, _, epoch_str = utils.load_checkpoint(
-            utils.latest_checkpoint_path(hps.model_dir, "G_*.pth"), net_g, optim_g)
+        _, _, _, epoch_str = utils.load_checkpoint(utils.latest_checkpoint_path(
+            hps.model_idr, "G_*.pth"), net_g, optim_g)
         _, _, _, epoch_str = utils.load_checkpoint(
             utils.latest_checkpoint_path(hps.model_dir, "D_*.pth"), net_d, optim_d)
         global_step = (epoch_str - 1) * len(train_loader)
@@ -115,10 +100,10 @@ def run(rank, n_gpus, hps):
         epoch_str = 1
         global_step = 0
 
-    scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
-        optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
-    scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
-        optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
+    scheduler_g = optim.lr_scheduler.ExponentialLR(
+        optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
+    scheduler_d = optim.lr_scheduler.ExponentialLR(
+        optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
 
     scaler = GradScaler(enabled=hps.train.fp16_run)
 
@@ -138,7 +123,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     optim_g, optim_d = optims
     scheduler_g, scheduler_d = schedulers
     train_loader, eval_loader = loaders
-    if writers is not None:
+    if not writers is None:
         writer, writer_eval = writers
 
     train_loader.batch_sampler.set_epoch(epoch)
@@ -159,13 +144,12 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 (z, z_p, m_p, logs_p, m_q, logs_q) = net_g(
                     x, x_lengths, spec, spec_lengths)
 
-            mel = spec_to_mel_torch(
-                spec,
-                hps.data.filter_length,
-                hps.data.n_mel_channels,
-                hps.data.sampling_rate,
-                hps.data.mel_fmin,
-                hps.data.mel_fmax)
+            mel = spec_to_mel_torch(spec,
+                                    hps.data.filter_length,
+                                    hps.data.n_mel_channels,
+                                    hps.data.sampling_rate,
+                                    hps.data.mel_fmin,
+                                    hps.data.mel_fmax)
             y_mel = commons.slice_segments(
                 mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
             y_hat_mel = mel_spectrogram_torch(
@@ -176,11 +160,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 hps.data.hop_length,
                 hps.data.win_length,
                 hps.data.mel_fmin,
-                hps.data.mel_fmax
-            )
-
+                hps.data.mel_fmax)
             y = commons.slice_segments(
-                y, ids_slice * hps.data.hop_length, hps.train.segment_size)  # slice
+                y, ids_slice * hps.data.hop_length, hps.train.segment_size)
 
             # Discriminator
             y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
@@ -199,10 +181,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
             with autocast(enabled=False):
                 loss_dur = torch.sum(l_length.float())
-                loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
-                loss_kl = kl_loss(z_p, logs_q, m_p, logs_p,
+                loss_mel = F.l1_loss(y_mel, y_hat_mel)
+                loss_kl = kl_loss(z_p, logs_q, m_q, logs_p,
                                   z_mask) * hps.train.c_kl
-
                 loss_fm = feature_loss(fmap_r, fmap_g)
                 loss_gen, losses_gen = generator_loss(y_d_hat_g)
                 loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl
