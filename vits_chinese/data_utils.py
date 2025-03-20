@@ -275,9 +275,9 @@ class TextAudioSpeakerCollate():
 
         text_padded = torch.LongTensor(len(batch), max_text_len)
         spec_padded = torch.FloatTensor(
-            len(batch), batch[0][1].size(0), max_spec_len)
-        wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
-        text_padded.zero_()
+            len(batch), batch[0][1].size(0), max_spec_len)  # B,D,T
+        wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)  # B,D=1,T
+        text_padded.zero_()  # 初始化为0
         spec_padded.zero_()
         wav_padded.zero_()
         for i in range(len(ids_sorted_decreasing)):
@@ -285,7 +285,7 @@ class TextAudioSpeakerCollate():
 
             text = row[0]
             text_padded[i, :text.size(0)] = text
-            text_lengths[i] = text.size(0)
+            text_lengths[i] = text.size(0)  # pad的数据计算mask需要原始长度
 
             spec = row[1]
             spec_padded[i, :, :spec.size(1)] = spec

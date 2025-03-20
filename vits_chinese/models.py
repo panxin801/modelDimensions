@@ -82,6 +82,7 @@ class SynthesizerTrn(nn.Module):
 
         self.use_sdp = use_sdp  # True
 
+        # 得到文本的先验分布
         self.enc_p = TextEncoder(n_vocab,
                                  inter_channels,
                                  hidden_channels,
@@ -90,6 +91,7 @@ class SynthesizerTrn(nn.Module):
                                  n_layers,
                                  kernel_size,
                                  p_dropout)
+        # 后验编码器
         self.enc_q = PosteriorEncoder(spec_channels,
                                       inter_channels,
                                       hidden_channels,
@@ -97,6 +99,7 @@ class SynthesizerTrn(nn.Module):
                                       1,
                                       16,
                                       gin_channels=gin_channels)
+        # 对先验分布进行提高表达能力的flow
         self.flow = ResidualCouplingBlock(inter_channels,
                                           hidden_channels,
                                           5,
@@ -288,7 +291,7 @@ class PosteriorEncoder(nn.Module):
     def forward(self, x, x_lengths, g=None):
         """
         Args:
-        x: [B,spec_channels, T]=[1, 513, 299]
+        x: [B,spec_channels, T]=[1, 513, 299], linear_spectrogram
         x_lengths: [B]=[1]
 
         Return:
@@ -303,7 +306,7 @@ class PosteriorEncoder(nn.Module):
         x = self.enc(x, x_mask, g=g)
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
-        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
+        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask  # 重参数化采样得到的z
         return z, m, logs, x_mask
 
 
@@ -327,7 +330,8 @@ class TextEncoder(nn.Module):
         self.kernel_size = kernel_size  # 3
         self.p_dropout = p_dropout  # 0.1
 
-        self.emb = nn.Embedding(self.n_vocab, self.hidden_channels)
+        self.emb = nn.Embedding(
+            self.n_vocab, self.hidden_channels)  # 单词映射成embedding向量
         nn.init.normal_(self.emb.weight, 0.0,
                         hidden_channels**-0.5)  # 权重进行正态分布初始化
 
@@ -336,8 +340,9 @@ class TextEncoder(nn.Module):
                                           self.n_heads,
                                           self.n_layers,
                                           self.kernel_size,
-                                          self.p_dropout)
-        self.proj = nn.Conv1d(self.hidden_channels, self.out_channels * 2, 1)
+                                          self.p_dropout)  # 就是transformer encoder
+        self.proj = nn.Conv1d(self.hidden_channels,
+                              self.out_channels * 2, 1)  # 相当于MLP
 
     def forward(self, x, x_lengths):
         """
@@ -352,7 +357,7 @@ class TextEncoder(nn.Module):
         x_mask: [B,1,L]=[1,1,199], 是x的mask
         """
         x = self.emb(
-            x) * math.sqrt(self.hidden_channels)  # x.size()= [b, t, hidden]
+            x) * math.sqrt(self.hidden_channels)  # x.size()= [b, t, hidden]， math.sqrt(self.hidden_channels)是为了缩放
         x = x.transpose(1, -1)  # x.size()=[b,hidden,t]
         x_mask = torch.unsqueeze(
             commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)  # x_mask.size()=[b,1,t]=[1,1,199]
@@ -531,7 +536,8 @@ class ResidualCouplingBlock(nn.Module):
         self.flows = nn.ModuleList()
         for i in range(n_flows):
             self.flows.append(modules.ResidualCouplingLayer(channels, hidden_channels,
-                              kernel_size, dilation_rate, n_layers, gin_channels=gin_channels, mean_only=True))
+                              kernel_size, dilation_rate, n_layers, gin_channels=gin_channels, mean_only=True))  # 耦合flow
+            # 这个是颠倒上边的flow，改变上边变化的部分，否则只有固定的一半在变化。
             self.flows.append(modules.Flip())
 
     def forward(self, x, x_mask, g=None, reverse=False):

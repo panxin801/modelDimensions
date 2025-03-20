@@ -99,65 +99,6 @@ class Flip(nn.Module):
             return x
 
 
-class ResidualCouplingLayer(nn.Module):
-    def __init__(self,
-                 channels,
-                 hidden_channels,
-                 kernel_size,
-                 dilation_rate,
-                 n_layers,
-                 p_dropout=0,
-                 gin_channels=0,
-                 mean_only=False):
-        assert channels % 2 == 0, "channels should be divisible by 2"
-        super().__init__()
-        self.channels = channels
-        self.hidden_channels = hidden_channels
-        self.kernel_size = kernel_size
-        self.dilation_rate = dilation_rate
-        self.n_layers = n_layers
-        self.half_channels = channels // 2
-        self.mean_only = mean_only
-
-        self.pre = nn.Conv1d(self.half_channels, hidden_channels, 1)
-        self.enc = WN(hidden_channels, kernel_size, dilation_rate,
-                      n_layers, p_dropout=p_dropout, gin_channels=gin_channels)
-        self.post = nn.Conv1d(
-            hidden_channels, self.half_channels * (2 - mean_only), 1)
-        self.post.weight.data.zero_()
-        self.post.bias.data.zero_()
-
-    def forward(self, x, x_mask, g=None, reverse=False):
-        """
-        Args:
-        x: [B,2,L]=[1,2,199]
-        x_mask
-
-        Return:
-        x:
-        logdet
-        """
-        x0, x1 = torch.split(x, [self.half_channels] * 2, 1)
-        h = self.pre(x0) * x_mask
-        h = self.enc(h, x_mask, g=g)
-        stats = self.post(h) * x_mask
-        if not self.mean_only:
-            m, logs = torch.split(stats, [self.half_channels] * 2, 1)
-        else:
-            m = stats
-            logs = torch.zeros_like(m)
-
-        if not reverse:
-            x1 = m + x1 * torch.exp(logs) * x_mask
-            x = torch.cat([x0, x1], 1)
-            logdet = torch.sum(logs, [1, 2])
-            return x, logdet
-        else:
-            x1 = (x1 - m) * torch.exp(-logs) * x_mask
-            x = torch.cat([x0, x1], 1)
-            return x
-
-
 class WN(torch.nn.Module):
     def __init__(self, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0, p_dropout=0):
         super(WN, self).__init__()
@@ -288,18 +229,19 @@ class ResidualCouplingLayer(nn.Module):
         logdet: 
         """
         x0, x1 = torch.split(x, [self.half_channels] * 2,
-                             1)  # x0 and x1 are all size [B,96,y_lengths]=[1,96,454]
+                             1)  # x0 and x1 are all size [B,96,y_lengths]=[1,96,454]。把x分成两个部分,x0就是上版的x1，x1就是下半部分。
         h = self.pre(x0) * x_mask  # [B,H,y_lengths]
         h = self.enc(h, x_mask, g=g)  # [B,H,y_lengths]
         stats = self.post(h) * x_mask  # [B,H/2, y_lengths]
         if not self.mean_only:
+            # ax+b logs就是a, m就是b。
             m, logs = torch.split(stats, [self.half_channels] * 2, 1)
         else:
             m = stats
             logs = torch.zeros_like(m)
 
         if not reverse:
-            x1 = m + x1 * torch.exp(logs) * x_mask
+            x1 = m + x1 * torch.exp(logs) * x_mask  # b+下半部分*a*mask
             x = torch.cat([x0, x1], 1)
             logdet = torch.sum(logs, [1, 2])
             return x, logdet

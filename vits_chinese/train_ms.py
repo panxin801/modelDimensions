@@ -4,14 +4,14 @@ import argparse
 import itertools
 import math
 import torch
-from torch import nn, optim
+from torch import (nn, optim)
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import (autocast, GradScaler)
 
 import commons
 import utils
@@ -69,7 +69,7 @@ def run(rank, n_gpus, hps):
     train_sampler = DistributedBucketSampler(
         train_dataset,
         hps.train.batch_size,
-        [32, 300, 400, 500, 600, 700, 800, 900, 1000],
+        [32, 300, 400, 500, 600, 700, 800, 900, 1000],  # 帧数
         num_replicas=n_gpus,
         rank=rank,
         shuffle=True)
@@ -90,6 +90,7 @@ def run(rank, n_gpus, hps):
         n_speakers=hps.data.n_speakers,
         **hps.model).cuda(rank)
     net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
+    # GAN的训练任务，两套优化器
     optim_g = torch.optim.AdamW(
         net_g.parameters(),
         hps.train.learning_rate,
@@ -100,23 +101,25 @@ def run(rank, n_gpus, hps):
         hps.train.learning_rate,
         betas=hps.train.betas,
         eps=hps.train.eps)
+    # 多卡训练，DDP包了以后，net_g.module才是真正的模型
     net_g = DDP(net_g, device_ids=[rank])
     net_d = DDP(net_d, device_ids=[rank])
 
     try:
+        # Load latest checkpoint
         _, _, _, epoch_str = utils.load_checkpoint(
             utils.latest_checkpoint_path(hps.model_dir, "G_*.pth"), net_g, optim_g)
         _, _, _, epoch_str = utils.load_checkpoint(
             utils.latest_checkpoint_path(hps.model_dir, "D_*.pth"), net_d, optim_d)
-        global_step = (epoch_str - 1) * len(train_loader)
+        global_step = (epoch_str - 1) * len(train_loader)  # epoch*batch_size
     except:
         epoch_str = 1
         global_step = 0
 
     scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
-        optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
+        optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
     scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
-        optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
+        optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
 
     scaler = GradScaler(enabled=hps.train.fp16_run)
 
@@ -125,6 +128,7 @@ def run(rank, n_gpus, hps):
             train_and_evaluate(rank, epoch, hps, [net_g, net_d], [optim_g, optim_d], [
                                scheduler_g, scheduler_d], scaler, [train_loader, eval_loader], logger, [writer, writer_eval])
         else:
+            # 不在0卡，只训练就行
             train_and_evaluate(rank, epoch, hps, [net_g, net_d], [optim_g, optim_d], [
                                scheduler_g, scheduler_d], scaler, [train_loader, None], None, None)
         scheduler_g.step()
@@ -139,12 +143,13 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     if writers is not None:
         writer, writer_eval = writers
 
-    train_loader.batch_sampler.set_epoch(epoch)
+    train_loader.batch_sampler.set_epoch(epoch)  # 控制桶排序的随机性，使得可以复现。
     global global_step
 
     net_g.train()
     net_d.train()
     for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, speakers) in enumerate(train_loader):
+        # x是文本，spec是线性谱，y是音频。
         x, x_lengths = x.cuda(rank, non_blocking=True), x_lengths.cuda(
             rank, non_blocking=True)
         spec, spec_lengths = spec.cuda(
@@ -153,10 +158,10 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             rank, non_blocking=True)
         speakers = speakers.cuda(rank, non_blocking=True)
 
-        with autocast(enabled=hps.train.fp16_run):
+        with autocast(enabled=hps.train.fp16_run):  # 使用混合精度训练
             y_hat, l_length, attn, ids_slice, x_mask, z_mask, \
                 (z, z_p, m_p, logs_p, m_q, logs_q) = net_g(
-                    x, x_lengths, spec, spec_lengths, speakers)
+                    x, x_lengths, spec, spec_lengths, speakers)  # 采样式训练，返回ids_slice。
 
             mel = spec_to_mel_torch(
                 spec,
@@ -164,7 +169,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 hps.data.n_mel_channels,
                 hps.data.sampling_rate,
                 hps.data.mel_fmin,
-                hps.data.mel_fmax)
+                hps.data.mel_fmax)  # 线性谱转换梅尔谱，计算重构损失用。
             y_mel = commons.slice_segments(
                 mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
             y_hat_mel = mel_spectrogram_torch(
@@ -183,13 +188,15 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
             # Discriminator
             y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
-            with autocast(enabled=False):
+            with autocast(enabled=False):  # 计算loss这部分不走fp16
                 loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
                     y_d_hat_r, y_d_hat_g)
                 loss_disc_all = loss_disc
+
+        # net_d loss计算完了，就先回传一波
         optim_d.zero_grad()
         scaler.scale(loss_disc_all).backward()
-        scaler.unscale_(optim_d)
+        scaler.unscale_(optim_d)  # 还原optim_d的scale，不然clip_grad_value_会报错。
         grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
         scaler.step(optim_d)
 
@@ -203,7 +210,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                                   z_mask) * hps.train.c_kl
 
                 loss_fm = feature_loss(fmap_r, fmap_g)
-                loss_gen, losses_gen = generator_loss(y_d_hat_g)
+                loss_gen, losses_gen = generator_loss(y_d_hat_g)  # 对抗loss
                 loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl
         optim_g.zero_grad()
         scaler.scale(loss_gen_all).backward()
