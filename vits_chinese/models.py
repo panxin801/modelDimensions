@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import attentions
 import commons
 import modules
+import monotonic_align
 from commons import (get_padding)
 
 
@@ -89,13 +90,13 @@ class SynthesizerTrn(nn.Module):
                                  n_layers,
                                  kernel_size,
                                  p_dropout)
-        # self.enc_q = PosteriorEncoder(spec_channels,
-        #                               inter_channels,
-        #                               hidden_channels,
-        #                               5,
-        #                               1,
-        #                               16,
-        #                               gin_channels=gin_channels)
+        self.enc_q = PosteriorEncoder(spec_channels,
+                                      inter_channels,
+                                      hidden_channels,
+                                      5,
+                                      1,
+                                      16,
+                                      gin_channels=gin_channels)
         self.flow = ResidualCouplingBlock(inter_channels,
                                           hidden_channels,
                                           5,
@@ -128,11 +129,77 @@ class SynthesizerTrn(nn.Module):
         if self.n_speakers > 1:
             self.emb_g = nn.Embedding(n_speakers, gin_channels)
 
-    # def forward(self, x, x_lengths, y, y_lengths, sid=None):
-    #     x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
+    def forward(self, x, x_lengths, y, y_lengths, sid=None):
+        """
+        Args:
+        x: [B, L]=[1, 199], 199是文本音素内容长度。x是文本音素
+        x_lengths: [B]=[199], 存的是文本音素长度。x_lengths是文本音素长度
+        y: [B,spec_channels, T]=[1, 513, 299]
+        y_lengths: [B]=[1]
 
-    #     # This is temporary
-    #     return x
+        Return:
+        o: [B,1,Time]=【1,1,8192】
+        l_length: [B]=[1]
+        attn: [B,1,T,D]=[1,1,299,127]
+        ids_slice: [B]=[1]
+        x_mask: [B,1,D]=[1,1,127]
+        y_mask: [B,1,T]=[1,1,299]
+        z: [B,H,T]=[1,192,299]
+        z_p: [B,H,T]=[1,192,299]
+        m_p: [B,H,T]=[1,192,299]
+        logs_p: [B,H,T]=[1,192,299]
+        m_q: [B,H,T]=[1,192,299]
+        logs_q: [B,H,T]=[1,192,299]
+        """
+        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
+        if self.n_speakers > 0:
+            g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
+        else:
+            g = None
+
+        z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
+        z_p = self.flow(z, y_mask, g=g)
+
+        with torch.no_grad():
+            # negative cross-entropy
+            s_p_sq_r = torch.exp(-2 * logs_p)  # [b, d, t]
+            neg_cent1 = torch.sum(-0.5 * math.log(2 * math.pi) -
+                                  logs_p, [1], keepdim=True)  # [b, 1, t_s]
+            # [b, t_t, d] x [b, d, t_s] = [b, t_t, t_s]
+            neg_cent2 = torch.matmul(-0.5 *
+                                     (z_p ** 2).transpose(1, 2), s_p_sq_r)
+            # [b, t_t, d] x [b, d, t_s] = [b, t_t, t_s]
+            neg_cent3 = torch.matmul(z_p.transpose(1, 2), (m_p * s_p_sq_r))
+            neg_cent4 = torch.sum(-0.5 * (m_p ** 2) * s_p_sq_r,
+                                  [1], keepdim=True)  # [b, 1, t_s]
+            neg_cent = neg_cent1 + neg_cent2 + neg_cent3 + neg_cent4
+
+            attn_mask = torch.unsqueeze(
+                x_mask, 2) * torch.unsqueeze(y_mask, -1)
+            attn = monotonic_align.maximum_path(
+                neg_cent, attn_mask.squeeze(1)).unsqueeze(1).detach()
+
+        w = attn.sum(2)
+        if self.use_sdp:
+            l_length = self.dp(x, x_mask, w, g=g)
+            l_length = l_length / torch.sum(x_mask)
+        else:
+            logw_ = torch.log(w + 1e-6) * x_mask
+            logw = self.dp(x, x_mask, g=g)
+            l_length = torch.sum(
+                (logw - logw_)**2, [1, 2]) / torch.sum(x_mask)  # for averaging
+
+        # expand prior
+        m_p = torch.matmul(attn.squeeze(
+            1), m_p.transpose(1, 2)).transpose(1, 2)
+        logs_p = torch.matmul(attn.squeeze(
+            1), logs_p.transpose(1, 2)).transpose(1, 2)
+
+        z_slice, ids_slice = commons.rand_slice_segments(
+            z, y_lengths, self.segment_size)
+        o = self.dec(z_slice, g=g)
+
+        return o, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q)
 
     def infer(self, x, x_lengths, sid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None):
         """
@@ -141,13 +208,13 @@ class SynthesizerTrn(nn.Module):
         x_lengths: [B]=[199], 存的是文本音素长度。x_lengths是文本音素长度
 
         Return:
-        o:
-        attn:
-        y_mask:
-        z:
-        z_p:
-        m_p:
-        logs_p:
+        o: [B,1,Time]=【1,1,8192】
+        attn: [B,1,T,D]=[1,1,299,127]
+        y_mask: [B,1,T]=[1,1,299]
+        z: [B,H,T]=[1,192,299]
+        z_p: [B,H,T]=[1,192,299] 
+        m_p: [B,H,T]=[1,192,299]
+        logs_p: [B,H,T]=[1,192,299]
         """
         x, m_p, logs_p, x_mask = self.enc_p(
             x, x_lengths)  # x.size()=[1, 199], x_lengths.size()=[199]
@@ -193,6 +260,51 @@ class SynthesizerTrn(nn.Module):
         z_hat = self.flow(z_p, y_mask, g=g_tgt, reverse=True)
         o_hat = self.dec(z_hat * y_mask, g=g_tgt)
         return o_hat, y_mask, (z, z_p, z_hat)
+
+
+class PosteriorEncoder(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 hidden_channels,
+                 kernel_size,
+                 dilation_rate,
+                 n_layers,
+                 gin_channels=0):
+        super().__init__()
+        self.in_channels = in_channels  # 513
+        self.out_channels = out_channels  # 192
+        self.hidden_channels = hidden_channels  # 192
+        self.kernel_size = kernel_size  # 5
+        self.dilation_rate = dilation_rate  # 1
+        self.n_layers = n_layers  # 16
+        self.gin_channels = gin_channels  # 0
+
+        self.pre = nn.Conv1d(in_channels, hidden_channels, 1)
+        self.enc = modules.WN(hidden_channels, kernel_size,
+                              dilation_rate, n_layers, gin_channels=gin_channels)
+        self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
+
+    def forward(self, x, x_lengths, g=None):
+        """
+        Args:
+        x: [B,spec_channels, T]=[1, 513, 299]
+        x_lengths: [B]=[1]
+
+        Return:
+        z: [B, out_channels, T]=[1, 192, 299]
+        m: [B, out_channels, T]=[1, 192, 299]
+        logs: [B, out_channels, T]=[1, 192, 299]
+        x_mask: [B, 1, T]=[1, 1, 299]
+        """
+        x_mask = torch.unsqueeze(commons.sequence_mask(
+            x_lengths, x.size(2)), 1).to(x.dtype)
+        x = self.pre(x) * x_mask
+        x = self.enc(x, x_mask, g=g)
+        stats = self.proj(x) * x_mask
+        m, logs = torch.split(stats, self.out_channels, dim=1)
+        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
+        return z, m, logs, x_mask
 
 
 class TextEncoder(nn.Module):

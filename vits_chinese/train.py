@@ -1,6 +1,4 @@
 import os
-os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
-
 import torch
 import torch.optim as optim
 import torch.multiprocessing as mp
@@ -48,7 +46,7 @@ def run(rank, n_gpus, hps):
             log_dir=os.path.join(hps.model_dir, "eval"))
 
     dist.init_process_group(
-        backend="gloo", init_method="env://", world_size=n_gpus, rank=rank)
+        backend="nccl", init_method="env://", world_size=n_gpus, rank=rank)
     torch.manual_seed(hps.train.seed)
     torch.cuda.set_device(rank)
 

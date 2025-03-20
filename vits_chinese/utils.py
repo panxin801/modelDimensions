@@ -47,6 +47,30 @@ def load_checkpoint(checkpoint_path, model, optimizer=None):
     return model, optimizer, learning_rate, iteration
 
 
+def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path):
+    logger.info("Saving model and optimizer state at iteration {} to {}".format(
+        iteration, checkpoint_path))
+    if hasattr(model, 'module'):
+        state_dict = model.module.state_dict()
+    else:
+        state_dict = model.state_dict()
+    torch.save({'model': state_dict,
+                'iteration': iteration,
+                'optimizer': optimizer.state_dict(),
+                'learning_rate': learning_rate}, checkpoint_path)
+
+
+def summarize(writer, global_step, scalars={}, histograms={}, images={}, audios={}, audio_sampling_rate=22050):
+    for k, v in scalars.items():
+        writer.add_scalar(k, v, global_step)
+    for k, v in histograms.items():
+        writer.add_histogram(k, v, global_step)
+    for k, v in images.items():
+        writer.add_image(k, v, global_step, dataformats='HWC')
+    for k, v in audios.items():
+        writer.add_audio(k, v, global_step, audio_sampling_rate)
+
+
 def get_hparams_from_file(configPath):
     with open(configPath, "rt", encoding="utf8") as fr:
         data = fr.read()
