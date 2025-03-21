@@ -116,6 +116,7 @@ class SynthesizerTrn(nn.Module):
                              gin_channels=gin_channels)
 
         if self.use_sdp:
+            # 随机时长（说话韵律节奏）预测器
             self.dp = StochasticDurationPredictor(hidden_channels,
                                                   192,
                                                   3,
@@ -154,14 +155,15 @@ class SynthesizerTrn(nn.Module):
         m_q: [B,H,T]=[1,192,299]
         logs_q: [B,H,T]=[1,192,299]
         """
-        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
+        x, m_p, logs_p, x_mask = self.enc_p(
+            x, x_lengths)  # x是编码后，m_p 是均值，logs_p是方差,x_mask是文本mask
         if self.n_speakers > 0:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
 
-        z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
-        z_p = self.flow(z, y_mask, g=g)
+        z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)  # z的时间维度和y一致
+        z_p = self.flow(z, y_mask, g=g)  # 后验中的z经过逆flow得到的z_p就是f(z,c)
 
         with torch.no_grad():
             # negative cross-entropy
@@ -182,9 +184,10 @@ class SynthesizerTrn(nn.Module):
             attn = monotonic_align.maximum_path(
                 neg_cent, attn_mask.squeeze(1)).unsqueeze(1).detach()
 
-        w = attn.sum(2)
+        w = attn.sum(2)  # 每个text对应频谱有多少个是这里定的。
+        # 这里的l_length表示的是loss_length
         if self.use_sdp:
-            l_length = self.dp(x, x_mask, w, g=g)
+            l_length = self.dp(x, x_mask, w, g=g)  # l_length是对数似然
             l_length = l_length / torch.sum(x_mask)
         else:
             logw_ = torch.log(w + 1e-6) * x_mask
@@ -303,8 +306,8 @@ class PosteriorEncoder(nn.Module):
         x_mask = torch.unsqueeze(commons.sequence_mask(
             x_lengths, x.size(2)), 1).to(x.dtype)
         x = self.pre(x) * x_mask
-        x = self.enc(x, x_mask, g=g)
-        stats = self.proj(x) * x_mask
+        x = self.enc(x, x_mask, g=g)  # 加入sid作为条件
+        stats = self.proj(x) * x_mask  # proj映射x到两个统计量
         m, logs = torch.split(stats, self.out_channels, dim=1)
         z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask  # 重参数化采样得到的z
         return z, m, logs, x_mask
@@ -417,19 +420,23 @@ class StochasticDurationPredictor(nn.Module):
     def forward(self, x, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
         """
         Args:
-        x: [B,H,L]=[1,192,199]
+        x: [B,H,L]=[1,192,199]， 文本编码后特征
         x_mask: [B,1,L]=[1,1,199]
+        w: 时长
+        g: 状态
 
         Return:
         logw: [B,1,L]=[1,1,199]
         """
-        x = torch.detach(x)
-        x = self.pre(x)  # After self.pre x.size()=[B,H,L]=[1,192,199]
+        x = torch.detach(x)  # 分离梯度，梯度到此阶段不回传
+
+        # After self.pre x.size()=[B,H,L]=[1,192,199]，是一个pointwise卷积
+        x = self.pre(x)
         if g is not None:
             g = torch.detach(g)
             x = x + self.cond(g)
         x = self.convs(x, x_mask)
-        x = self.proj(x) * x_mask  # x.size()=[B,H,L]=[1,192,199]
+        x = self.proj(x) * x_mask  # x.size()=[B,H,L]=[1,192,199]，到这里的x就是论文里的c
 
         if not reverse:
             flows = self.flows
@@ -438,16 +445,20 @@ class StochasticDurationPredictor(nn.Module):
             logdet_tot_q = 0
             h_w = self.post_pre(w)
             h_w = self.post_convs(h_w, x_mask)
-            h_w = self.post_proj(h_w) * x_mask
+            h_w = self.post_proj(h_w) * x_mask  # h_w就是公式里的d
+
             e_q = torch.randn(w.size(0), 2, w.size(2)).to(
-                device=x.device, dtype=x.dtype) * x_mask
+                device=x.device, dtype=x.dtype) * x_mask  # 使用变分增广flow 所以是2，不是1。
             z_q = e_q
             for flow in self.post_flows:
                 z_q, logdet_q = flow(z_q, x_mask, g=(x + h_w))
                 logdet_tot_q += logdet_q
+
             z_u, z1 = torch.split(z_q, [1, 1], 1)
-            u = torch.sigmoid(z_u) * x_mask
+            u = torch.sigmoid(z_u) * x_mask  # 已经得到了u，v(z1)
+
             z0 = (w - u) * x_mask
+            # 下边这两行是后验分布的对数似然。
             logdet_tot_q += torch.sum((F.logsigmoid(z_u) +
                                       F.logsigmoid(-z_u)) * x_mask, [1, 2])
             logq = torch.sum(-0.5 * (math.log(2 * math.pi) +
