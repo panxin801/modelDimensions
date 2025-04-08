@@ -1,10 +1,31 @@
-import glob
+import logging
+import sys
 import os
-import matplotlib
 import torch
-from torch.nn.utils import weight_norm
+import glob
+import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pylab as plt
+
+logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
+
+
+def getLogger(modelDir, fileName="train.log"):
+    global logger
+
+    logger = logging.getLogger(os.path.basename(modelDir))
+    logger.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter(
+        "%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s")
+    if not os.path.exists(modelDir):
+        os.makedirs(modelDir)
+    h = logging.FileHandler(os.path.join(modelDir, fileName))
+    h.setLevel(logging.DEBUG)
+    h.setFormatter(formatter)
+    logger.addHandler(h)
+
+    return logger
 
 
 def plot_spectrogram(spectrogram):
@@ -19,40 +40,39 @@ def plot_spectrogram(spectrogram):
     return fig
 
 
-def init_weights(m, mean=0.0, std=0.01):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1:
-        m.weight.data.normal_(mean, std)
+def init_weights(cla, mean=0.0, std=0.01):
+    clsName = cla.__class__.__name__
+    if clsName.find("Conv") != -1:
+        cla.weight.data.normal_(mean, std)
 
 
-def apply_weight_norm(m):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1:
-        weight_norm(m)
+def apply_weight_norm(cla):
+    clsName = cla.__class__.__name__
+    if clsName.find("Conv") != -1:
+        torch.nn.utils.weight_norm(cla)
 
 
 def get_padding(kernel_size, dilation=1):
-    return int((kernel_size*dilation - dilation)/2)
+    return int((kernel_size * dilation - dilation) / 2)
 
 
-def load_checkpoint(filepath, device):
+def load_checkpoint(filepath):
     assert os.path.isfile(filepath)
-    print("Loading '{}'".format(filepath))
-    checkpoint_dict = torch.load(filepath, map_location=device)
+    print(f"Loading '{filepath}'")
+    checkpoint_dict = torch.load(filepath, map_location="cpu")
     print("Complete.")
     return checkpoint_dict
 
 
 def save_checkpoint(filepath, obj):
-    print("Saving checkpoint to {}".format(filepath))
+    print(f"Saving checkpoint to {filepath}")
     torch.save(obj, filepath)
     print("Complete.")
 
 
 def scan_checkpoint(cp_dir, prefix):
-    pattern = os.path.join(cp_dir, prefix + '????????')
+    pattern = os.path.join(cp_dir, prefix + "???????")
     cp_list = glob.glob(pattern)
     if len(cp_list) == 0:
         return None
     return sorted(cp_list)[-1]
-
