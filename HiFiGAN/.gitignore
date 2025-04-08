@@ -2,3 +2,5 @@ __pycache__
 LJSpeech-1.1/wavs
 logs
 cp_hifigan
+generated_files
+test_files

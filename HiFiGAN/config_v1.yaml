@@ -54,7 +54,7 @@ input_validation_file: LJSpeech-1.1/validation.txt
 checkpoint_path: cp_hifigan
 training_epochs: 3100
 stdout_interval: 5
-checkpoint_interval: 5000
+checkpoint_interval: 500
 summary_interval: 100
 validation_interval: 1000
 fine_tuning: false

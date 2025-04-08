@@ -60,7 +60,6 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
                   ] = torch.from_numpy(mel).float().to(y.device)
         hann_window[str(y.device)] = torch.hann_window(win_size).to(y.device)
 
-    print(y.size())
     y = torch.nn.functional.pad(y.unsqueeze(
         1), (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)), mode="reflect")
     y = y.squeeze(1)
@@ -128,7 +127,6 @@ class MelDataset(data.Dataset):
 
     def __getitem__(self, index):
         filename = self.audio_files[index]
-        print(f"filename={filename}")
 
         if self._cache_ref_count == 0:
             audio, sampling_rate = load_wav(filename)

@@ -165,7 +165,7 @@ def train(rank, configs, logger):
 
             y_g_hat = generator(x)
             y_g_hat_mel = meldataset.mel_spectrogram(
-                y_g_hat, configs.n_fft, configs.num_mels, configs.sampling_rate, configs.hop_size, configs.win_size, configs.fmin, configs.fmax_for_loss)
+                y_g_hat.squeeze(1), configs.n_fft, configs.num_mels, configs.sampling_rate, configs.hop_size, configs.win_size, configs.fmin, configs.fmax_for_loss)
 
             optim_do.zero_grad()
 
@@ -212,13 +212,13 @@ def train(rank, configs, logger):
                     checkpoint_path = "{}/g_{:08d}".format(
                         configs.checkpoint_path, steps)
                     utils.save_checkpoint(checkpoint_path,
-                                          {"generator": (generator.module if h.num_gpus > 1 else generator).state_dict()})
+                                          {"generator": (generator.module if configs.num_gpus > 1 else generator).state_dict()})
                     checkpoint_path = "{}/do_{:08d}".format(
                         configs.checkpoint_path, steps)
                     utils.save_checkpoint(checkpoint_path,
-                                          {"mpd": (mpd.module if h.num_gpus > 1
+                                          {"mpd": (mpd.module if configs.num_gpus > 1
                                                    else mpd).state_dict(),
-                                           "msd": (msd.module if h.num_gpus > 1
+                                           "msd": (msd.module if configs.num_gpus > 1
                                                    else msd).state_dict(),
                                            "optim_g": optim_g.state_dict(), "optim_d": optim_do.state_dict(), "steps": steps,
                                            "epoch": epoch})
@@ -283,6 +283,8 @@ def main():
 
     configs = OmegaConf.load(parse.config)
     logger = utils.getLogger(configs.modelDir)
+
+    # TODO cp config yaml file to dest dir
 
     # Set seed
     torch.manual_seed(configs.seed)

@@ -7,21 +7,21 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pylab as plt
 
-logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
 
 def getLogger(modelDir, fileName="train.log"):
     global logger
 
     logger = logging.getLogger(os.path.basename(modelDir))
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
 
     formatter = logging.Formatter(
         "%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s")
     if not os.path.exists(modelDir):
         os.makedirs(modelDir)
     h = logging.FileHandler(os.path.join(modelDir, fileName))
-    h.setLevel(logging.DEBUG)
+    h.setLevel(logging.INFO)
     h.setFormatter(formatter)
     logger.addHandler(h)
 
