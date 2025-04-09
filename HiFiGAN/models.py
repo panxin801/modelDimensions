@@ -101,7 +101,7 @@ class Generator(torch.nn.Module):
                                    k, u, padding=(k - u) // 2)))
         # self.ups has 4 convtranspose1d layers
 
-        self.resblocks = nn.ModuleList()
+        self.resblocks = nn.ModuleList()  # MRF blocks
         # h.resblock_dilation_sizes=[(1,3,5),(1,3,5),(1,3,5),(1,3,5)]
         for i in range(len(self.ups)):
             ch = h.upsample_initial_channel // (2**(i + 1))
@@ -174,7 +174,7 @@ class DiscriminatorP(torch.nn.Module):
         x: [B,1,segments]=[16,1,8192], segments=8192
 
         Return:
-        x: [B,1,T,2]
+        x: [B,1,T,C]
         fmap: len(fmap)=len(convs)+1(conv_post), each element is [B,1,T,C] T,C are changed in each layer
         """
         fmap = []
