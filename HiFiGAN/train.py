@@ -42,6 +42,9 @@ def train(rank, configs, logger):
         logger.info(generator)
         os.makedirs(configs.checkpoint_path, exist_ok=True)
         print(f"Checkpoints directory: {configs.checkpoint_path}")
+        # save to yaml file
+        with open(os.path.join(configs.checkpoint_path, "config.yaml"), "wt", encoding="utf8") as fw:
+            OmegaConf.save(configs, fw)
 
     # Scan ckpts
     if os.path.isdir(configs.checkpoint_path):
@@ -283,8 +286,6 @@ def main():
 
     configs = OmegaConf.load(parse.config)
     logger = utils.getLogger(configs.modelDir)
-
-    # TODO cp config yaml file to dest dir
 
     # Set seed
     torch.manual_seed(configs.seed)

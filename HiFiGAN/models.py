@@ -11,6 +11,7 @@ class ResBlock1(torch.nn.Module):
     def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5)):
         super().__init__()
         self.h = h
+        # channels=256
         self.convs1 = nn.Sequential(
             nn.utils.weight_norm(nn.Conv1d(channels, channels, kernel_size, 1,
                                  dilation=dilation[0], padding=get_padding(kernel_size, dilation[0]))),
@@ -19,7 +20,7 @@ class ResBlock1(torch.nn.Module):
             nn.utils.weight_norm(nn.Conv1d(channels, channels, kernel_size, 1,
                                  dilation=dilation[2], padding=get_padding(kernel_size, dilation[2]))),
         )
-        self.convs1.apply(init_weights)
+        self.convs1.apply(init_weights)  # self.convs1 has 3 conv1d layers
 
         self.convs2 = nn.ModuleList([
             nn.utils.weight_norm(nn.Conv1d(channels, channels, kernel_size, 1, dilation=1,
@@ -29,7 +30,7 @@ class ResBlock1(torch.nn.Module):
             nn.utils.weight_norm(nn.Conv1d(channels, channels, kernel_size, 1, dilation=1,
                                            padding=get_padding(kernel_size, 1)))
         ])
-        self.convs2.apply(init_weights)
+        self.convs2.apply(init_weights)  # self.convs2 has 3 conv1d layers
 
     def forward(self, x):
         for c1, c2 in zip(self.convs1, self.convs2):
@@ -77,23 +78,28 @@ class Generator(torch.nn.Module):
         super().__init__()
 
         self.h = h
+        # h.resblock_kernel_sizes=[3,7,11]
         self.num_kernels = len(h.resblock_kernel_sizes)
-        self.num_upsamples = len(h.upsample_rates)
+        self.num_upsamples = len(h.upsample_rates)  # [8,8,2,2]
         self.conv_pre = nn.utils.weight_norm(
-            nn.Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))
+            nn.Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))  # upsample_initial_channel=512
         resblock = ResBlock1 if h.resblock == "1" else ResBlock2
 
         self.ups = nn.ModuleList()
+        # upsample_kernel_sizes=[16,16,4,4]
         for i, (u, k) in enumerate(zip(h.upsample_rates, h.upsample_kernel_sizes)):
             self.ups.append(nn.utils.weight_norm(
                 nn.ConvTranspose1d(h.upsample_initial_channel // (2 ** i),
                                    h.upsample_initial_channel // (2**(i + 1)),
                                    k, u, padding=(k - u) // 2)))
+        # self.ups has 4 convtranspose1d layers
 
         self.resblocks = nn.ModuleList()
+        # h.resblock_dilation_sizes=[(1,3,5),(1,3,5),(1,3,5),(1,3,5)]
         for i in range(len(self.ups)):
             ch = h.upsample_initial_channel // (2**(i + 1))
             for j, (k, d) in enumerate(zip(h.resblock_kernel_sizes, h.resblock_dilation_sizes)):
+                # self.resblocks has 4*3=12 resblock layers
                 self.resblocks.append(resblock(h, ch, k, d))
 
         self.conv_post = nn.utils.weight_norm(
