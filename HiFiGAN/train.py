@@ -159,22 +159,26 @@ def train(rank, configs, logger):
             if rank == 0:
                 start_b = time.time()
 
+            # x.size()=[b,num_mels, frames_of_segments]
+            # y.size()=[b, segments]
+            # y_mel.size()=[b, num_mels, frames_of_segments]
             x, y, _, y_mel = batch
             x = torch.autograd.Variable(x.cuda(rank, non_blocking=True))
             y = torch.autograd.Variable(y.cuda(rank, non_blocking=True))
             y_mel = torch.autograd.Variable(
                 y_mel.cuda(rank, non_blocking=True))
-            y = y.unsqueeze(1)
+            y = y.unsqueeze(1)  # [b,1,segments]
 
-            y_g_hat = generator(x)
+            y_g_hat = generator(x)  # y_g_hat.size()=[b,1,segments]
             y_g_hat_mel = meldataset.mel_spectrogram(
                 y_g_hat.squeeze(1), configs.n_fft, configs.num_mels, configs.sampling_rate, configs.hop_size, configs.win_size, configs.fmin, configs.fmax_for_loss)
+            # y_g_hat_mel.size()=[B,num_mels, frames_of_segments]
 
             optim_do.zero_grad()
 
             # MPD
             y_df_hat_r, y_df_hat_g, _, _ = mpd(
-                y, y_g_hat.detach())  # mpd 不影响generator。
+                y, y_g_hat.detach())  # mpd 不影响generator。 y_df_hat_r is list contains [B,1,T,C] each element has different T,C dim
             loss_disc_f, loss_disc_f_r, loss_disc_f_g = discriminator_loss(
                 y_df_hat_r, y_df_hat_g)
 

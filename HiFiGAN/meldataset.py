@@ -106,30 +106,30 @@ class MelDataset(data.Dataset):
                  base_mels_path=None):
         self.audio_files = training_files
         random.seed(1234)
-        if shuffle:
+        if shuffle:  # shuffle=True
             random.shuffle(self.audio_files)
-        self.segment_size = segment_size
-        self.n_fft = n_fft
-        self.num_mels = num_mels
-        self.hop_size = hop_size
-        self.win_size = win_size
-        self.sampling_rate = sampling_rate
-        self.fmin = fmin
-        self.fmax = fmax
-        self.fmax_loss = fmax_loss
-        self.split = split
-        self.n_cache_reuse = n_cache_reuse
+        self.segment_size = segment_size  # 8192
+        self.n_fft = n_fft  # 1024
+        self.num_mels = num_mels  # 80
+        self.hop_size = hop_size  # 256
+        self.win_size = win_size  # 1024
+        self.sampling_rate = sampling_rate  # 22050
+        self.fmin = fmin  # 0
+        self.fmax = fmax  # 8000
+        self.fmax_loss = fmax_loss  # None
+        self.split = split  # True
+        self.n_cache_reuse = n_cache_reuse  # 0
         self._cache_ref_count = 0
         self.cache_wav = None
-        self.device = device
-        self.fine_tuning = fine_tuning
-        self.base_mels_path = base_mels_path
+        self.device = device  # None
+        self.fine_tuning = fine_tuning  # False
+        self.base_mels_path = base_mels_path  # ft_dataset
 
     def __getitem__(self, index):
         filename = self.audio_files[index]
 
         if self._cache_ref_count == 0:
-            audio, sampling_rate = load_wav(filename)
+            audio, sampling_rate = load_wav(filename)  # audio.shape=(samples,)
             audio = audio / MAX_WAV_VALUE
             if not self.fine_tuning:
                 audio = normalize(audio) * 0.95
@@ -143,7 +143,7 @@ class MelDataset(data.Dataset):
             self._cache_ref_count -= 1
 
         audio = torch.FloatTensor(audio)
-        audio = audio.unsqueeze(0)
+        audio = audio.unsqueeze(0)  # audio is tensor size=(1,samples)
 
         if not self.fine_tuning:
             if self.split:
@@ -157,7 +157,7 @@ class MelDataset(data.Dataset):
                                   audio.size(1)), "constant")
             mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
                                   self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
-                                  center=False)
+                                  center=False)  # mel.size()=[b, num_mels, frames]
         else:
             mel = np.load(
                 os.path.join(self.base_mels_path, os.path.splitext(os.path.split(filename)[-1])[0] + ".npy"))
@@ -182,7 +182,7 @@ class MelDataset(data.Dataset):
 
         mel_loss = mel_spectrogram(audio, self.n_fft, self.num_mels,
                                    self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax_loss,
-                                   center=False)
+                                   center=False)  # mel_loss.size()=[b, num_mels, frames]
 
         return (mel.squeeze(), audio.squeeze(0), filename, mel_loss.squeeze())
 
