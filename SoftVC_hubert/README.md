@@ -168,8 +168,9 @@ If you found this work helpful please consider citing our paper:
 ```
 
 ## Self Note
-1. 使用hubert 提取音频的离散特征存储到文件中作为label。这里的模型结构就是HubertDiscrete(hubert+kmeans(100))
-2. 使用hubert(feature_extractor + proj)计算和hubertDiscrete的特征的距离，作为soft label。
+1. 使用hubert 提取音频的离散特征存储到文件中作为label。这里的模型结构就是HubertDiscrete(hubert+kmeans(100))；
+2. 使用hubert(feature_extractor + proj)计算和hubertDiscrete的特征的距离，作为soft label；
+3. 在推理时使用hubert_soft进行soft unit的计算。
 
 hubert=feature_extractor+proj 有logits函数
 hubert_soft=hubert+proj 无logits函数
