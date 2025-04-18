@@ -6,23 +6,23 @@ from omegaconf import OmegaConf
 
 
 def main(args):
-    if (args.ppg == None):
-        args.ppg = "svc_tmp.ppg.npy"
-        print(
-            f"Auto run : python whisper/inference.py -w {args.wave} -p {args.ppg}")
-        os.system(f"python whisper/inference.py -w {args.wave} -p {args.ppg}")
+    # if (args.ppg == None):
+    #     args.ppg = "svc_tmp.ppg.npy"
+    #     print(
+    #         f"Auto run : python whisper/inference.py -w {args.wave} -p {args.ppg}")
+    #     os.system(f"python whisper/inference.py -w {args.wave} -p {args.ppg}")
 
-    if (args.vec == None):
-        args.vec = "svc_tmp.vec.npy"
-        print(
-            f"Auto run : python hubert/inference.py -w {args.wave} -v {args.vec}")
-        os.system(f"python hubert/inference.py -w {args.wave} -v {args.vec}")
+    # if (args.vec == None):
+    #     args.vec = "svc_tmp.vec.npy"
+    #     print(
+    #         f"Auto run : python hubert/inference.py -w {args.wave} -v {args.vec}")
+    #     os.system(f"python hubert/inference.py -w {args.wave} -v {args.vec}")
 
-    if (args.pit == None):
-        args.pit = "svc_tmp.pit.csv"
-        print(
-            f"Auto run : python pitch/inference.py -w {args.wave} -p {args.pit}")
-        os.system(f"python pitch/inference.py -w {args.wave} -p {args.pit}")
+    # if (args.pit == None):
+    #     args.pit = "svc_tmp.pit.csv"
+    #     print(
+    #         f"Auto run : python pitch/inference.py -w {args.wave} -p {args.pit}")
+    #     os.system(f"python pitch/inference.py -w {args.wave} -p {args.pit}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     hp = OmegaConf.load(args.config)
