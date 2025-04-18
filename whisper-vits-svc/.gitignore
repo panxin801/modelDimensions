@@ -6,3 +6,5 @@ vits_pretrain/sovits5.0.pretrain.pth
 speaker_pretrain/best_model.pth.tar
 hubert_pretrain/hubert-soft-0d54a1f4.pt
 crepe/assets/*
+data_svc
+files
