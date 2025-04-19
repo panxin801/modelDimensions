@@ -191,7 +191,11 @@ class SynthesizerTrn(nn.Module):
         audio = self.dec(spk, z_slice, pit_slice)
 
         # SNAC to flow
+        z_r, logdet_r = self.flow(z_p, spec_mask, g=spk, reverse=True)
         z_f, logdet_f = self.flow(z_q, spec_mask, g=spk)
+        # speaker
+        spk_preds = self.speaker_classifier(x)
+        return audio, ids_slice, spec_mask, (z_f, z_r, z_p, m_p, logs_p, z_q, m_q, logs_q, logdet_f, logdet_r), spk_preds
 
     def infer(self, ppg, vec, pit, spk, ppg_l):
         ppg = ppg + torch.randn_like(ppg) * 0.0001  # Perturbation
