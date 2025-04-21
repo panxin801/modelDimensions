@@ -116,6 +116,7 @@ class Generator(torch.nn.Module):
         # nsf
         f0 = f0[:, None]
         f0 = self.f0_upsamp(f0).transpose(1, 2)
+        # 引入pitch信息用来更好拟合非语言的信号。Harmonic信号，多次谐波sin信号
         har_source = self.m_source(f0)
         har_source = har_source.transpose(1, 2)
 

@@ -58,8 +58,8 @@ class PulseGen(torch.nn.Module):
             uv_2[:, -1, :] = 0
 
             loc = (pure_sine > sine_1) * (pure_sine > sine_2) \
-                  * (uv_1 > 0) * (uv_2 > 0) * (uv > 0) \
-                  + (uv_1 < 1) * (uv > 0)
+                * (uv_1 > 0) * (uv_2 > 0) * (uv > 0) \
+                + (uv_1 < 1) * (uv > 0)
 
             # pulse train without noise
             pulse_train = pure_sine * loc
@@ -103,7 +103,8 @@ class SignalsConv1d(torch.nn.Module):
         groups = signal.shape[-1]
 
         # pad signal on the left
-        signal_pad = torch_nn_func.pad(signal.permute(0, 2, 1), (padding_length, 0))
+        signal_pad = torch_nn_func.pad(
+            signal.permute(0, 2, 1), (padding_length, 0))
         # prepare system impulse response as (dim, 1, length2)
         # also flip the impulse response
         ir = torch.flip(system_ir.unsqueeze(1).permute(2, 1, 0), dims=[2])
@@ -244,7 +245,8 @@ class SineGen(torch.nn.Module):
             # Buffer tmp_over_one_idx indicates the time step to add -1.
             # This will not change F0 of sine because (x-1) * 2*pi = x * 2*pi
             tmp_over_one = torch.cumsum(rad_values, 1) % 1
-            tmp_over_one_idx = (tmp_over_one[:, 1:, :] - tmp_over_one[:, :-1, :]) < 0
+            tmp_over_one_idx = (
+                tmp_over_one[:, 1:, :] - tmp_over_one[:, :-1, :]) < 0
             cumsum_shift = torch.zeros_like(rad_values)
             cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
 
@@ -289,7 +291,8 @@ class SineGen(torch.nn.Module):
         output uv: tensor(batchsize=1, length, 1)
         """
         with torch.no_grad():
-            f0_buf = torch.zeros(f0.shape[0], f0.shape[1], self.dim, device=f0.device)
+            f0_buf = torch.zeros(
+                f0.shape[0], f0.shape[1], self.dim, device=f0.device)
             # fundamental component
             f0_buf[:, :, 0] = f0[:, :, 0]
             for idx in np.arange(self.harmonic_num):
@@ -336,7 +339,8 @@ class SourceModuleCycNoise_v1(torch.nn.Module):
         super(SourceModuleCycNoise_v1, self).__init__()
         self.sampling_rate = sampling_rate
         self.noise_std = noise_std
-        self.l_cyc_gen = CyclicNoiseGen_v1(sampling_rate, noise_std, voiced_threshod)
+        self.l_cyc_gen = CyclicNoiseGen_v1(
+            sampling_rate, noise_std, voiced_threshod)
 
     def forward(self, f0_upsamped, beta):
         """
