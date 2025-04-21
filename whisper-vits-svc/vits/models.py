@@ -46,7 +46,7 @@ class TextEncoder(nn.Module):
         x = self.enc(x * x_mask, x_mask)
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
-        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
+        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask  # sampling
         return z, m, logs, x_mask, x
 
 
@@ -180,7 +180,8 @@ class SynthesizerTrn(nn.Module):
 
     def forward(self, ppg, vec, pit, spec, spk, ppg_l, spec_l):
         ppg = ppg + torch.randn_like(ppg) * 1  # Perturbation
-        vec = vec + torch.randn_like(vec) * 2  # Perturbation
+        # Perturbation, vec来自hubert是一个多层纯卷积的结构，不确定性会更大一点点。
+        vec = vec + torch.randn_like(vec) * 2
         g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
         z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
             ppg, ppg_l, vec, f0=f0_to_coarse(pit))

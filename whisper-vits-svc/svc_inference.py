@@ -165,14 +165,14 @@ def main(args):
     model.eval().to(device)
 
     spk = np.load(args.spk)
-    spk = torch.FloatTensor(spk)
+    spk = torch.FloatTensor(spk)  # dim=[256]
 
-    ppg = np.load(args.ppg)
+    ppg = np.load(args.ppg)  # [T,D] D=1280
     ppg = np.repeat(ppg, 2, 0)  # 320 PPG -> 160 * 2
     ppg = torch.FloatTensor(ppg)
     # ppg = torch.zeros_like(ppg)
 
-    vec = np.load(args.vec)
+    vec = np.load(args.vec)  # [T,D] D=256
     vec = np.repeat(vec, 2, 0)  # 320 PPG -> 160 * 2
     vec = torch.FloatTensor(vec)
 

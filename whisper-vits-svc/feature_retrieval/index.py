@@ -35,7 +35,8 @@ class FaissRetrievableFeatureIndex(FaissFeatureIndex[Index], abc.ABC):
     def __init__(self, index: T, ratio: float, n_nearest_vectors: int) -> None:
         super().__init__(index=index)
         if index.metric_type != self.supported_distance:
-            raise ValueError(f"index metric type {index.metric_type=} is unsupported {self.supported_distance=}")
+            raise ValueError(
+                f"index metric type {index.metric_type=} is unsupported {self.supported_distance=}")
 
         if 1 > n_nearest_vectors:
             raise ValueError("n-retrieval-vectors must be gte 1")
@@ -56,9 +57,12 @@ class FaissRetrievableFeatureIndex(FaissFeatureIndex[Index], abc.ABC):
 
     def retriv(self, features: NumpyArray) -> NumpyArray:
         # use method search_and_reconstruct instead of recreating the whole matrix
-        scores, _, nearest_vectors = self._index.search_and_reconstruct(features, k=self._n_nearest)
-        weighted_nearest_vectors = self._weight_nearest_vectors(nearest_vectors, scores)
-        retriv_vector = (1 - self._ratio) * features + self._ratio * weighted_nearest_vectors
+        scores, _, nearest_vectors = self._index.search_and_reconstruct(
+            features, k=self._n_nearest)
+        weighted_nearest_vectors = self._weight_nearest_vectors(
+            nearest_vectors, scores)
+        retriv_vector = (1 - self._ratio) * features + \
+            self._ratio * weighted_nearest_vectors
         return retriv_vector
 
 
@@ -148,7 +152,8 @@ class FaissIVFFlatTrainableFeatureIndexBuilder:
         n_ivf = min(int(16 * np.sqrt(num_vectors)), num_vectors // 39)
         factory_string = f"IVF{n_ivf},Flat"
         index = faiss.index_factory(vector_dim, factory_string, self._distance)
-        logger.debug('faiss index built by string "%s" and dimension %s', factory_string, vector_dim)
+        logger.debug('faiss index built by string "%s" and dimension %s',
+                     factory_string, vector_dim)
         index_ivf = faiss.extract_index_ivf(index)
         index_ivf.nprobe = 1
         return index

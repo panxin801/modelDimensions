@@ -18,6 +18,10 @@ f0_mel_max = 1127 * np.log(1 + f0_max / 700)
 
 
 def f0_to_coarse(f0):
+    """
+    Convert F0 to coarse F0 in the range [1, 255].
+    F0-> mel-> [1, 255]
+    """
     is_torch = isinstance(f0, torch.Tensor)
     f0_mel = 1127 * (1 + f0 / 700).log() if is_torch else 1127 * \
         np.log(1 + f0 / 700)

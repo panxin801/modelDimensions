@@ -1,6 +1,5 @@
 import abc
 import logging
-
 import torch
 
 from feature_retrieval import FaissRetrievableFeatureIndex
