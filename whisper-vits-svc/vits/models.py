@@ -124,7 +124,7 @@ class PosteriorEncoder(nn.Module):
             x.dtype
         )
         x = self.pre(x) * x_mask
-        x = self.enc(x, x_mask, g=g)
+        x = self.enc(x, x_mask, g=g)  # WaveNet WN
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
         z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
