@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 
 from torch.nn import Conv1d
-from torch.nn.utils import weight_norm, remove_weight_norm
+from torch.nn.utils import (remove_weight_norm, weight_norm)
+# from torch.nn.utils.parametrizations import (weight_norm)
 from .alias.act import SnakeAlias
 
 
@@ -13,7 +14,7 @@ def init_weights(m, mean=0.0, std=0.01):
 
 
 def get_padding(kernel_size, dilation=1):
-    return int((kernel_size*dilation - dilation)/2)
+    return int((kernel_size * dilation - dilation) / 2)
 
 
 class AMPBlock(torch.nn.Module):
@@ -48,6 +49,15 @@ class AMPBlock(torch.nn.Module):
         ])
 
     def forward(self, x):
+        """
+        Args:
+        x: [B, L]=[1, 199], 199是文本音素内容长度。x是文本音素
+        x_lengths: [B]=[199], 存的是文本音素长度。x_lengths是文本音素长度
+
+        Return:
+        o: [B,1,Time]=【1,1,8192】
+        """
+        # Perturbation
         acts1, acts2 = self.activations[::2], self.activations[1::2]
         for c1, c2, a1, a2 in zip(self.convs1, self.convs2, acts1, acts2):
             xt = a1(x)

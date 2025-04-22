@@ -23,12 +23,19 @@ class SpeakerAdapter(nn.Module):
 
     def reset_parameters(self):
         nn.init.constant_(self.W_scale.weight, 0.0)
-        nn.init.constant_(self.W_scale.weight, 0.0)
         nn.init.constant_(self.W_scale.bias, 1.0)
         nn.init.constant_(self.W_bias.weight, 0.0)
         nn.init.constant_(self.W_bias.bias, 0.0)
 
     def forward(self, x, speaker_embedding):
+        """
+        Args:
+        x: [B, D, T], D=192
+        speaker_embedding: [B, D], D=256
+
+        Return:
+        y: [B, D, T], D=192
+        """
         x = x.transpose(1, -1)
         mean = x.mean(dim=-1, keepdim=True)
         var = ((x - mean)**2).mean(dim=-1, keepdim=True)
@@ -50,13 +57,14 @@ class Generator(torch.nn.Module):
         self.num_kernels = len(hp.gen.resblock_kernel_sizes)
         self.num_upsamples = len(hp.gen.upsample_rates)
         # speaker adaper, 256 should change by what speaker encoder you use
+        # spk_dim=256, upsample_input=192
         self.adapter = SpeakerAdapter(hp.vits.spk_dim, hp.gen.upsample_input)
         # pre conv
         self.conv_pre = nn.Conv1d(hp.gen.upsample_input,
                                   hp.gen.upsample_initial_channel, 7, 1, padding=3)
         # nsf
         self.f0_upsamp = torch.nn.Upsample(
-            scale_factor=np.prod(hp.gen.upsample_rates))
+            scale_factor=np.prod(hp.gen.upsample_rates))  # Upsample 320 times
         self.m_source = SourceModuleHnNSF(sampling_rate=hp.data.sampling_rate)
         self.noise_convs = nn.ModuleList()
         # transposed conv-based upsamplers. does not apply anti-aliasing
@@ -65,6 +73,7 @@ class Generator(torch.nn.Module):
             # print(f'ups: {i} {k}, {u}, {(k - u) // 2}')
             # base
             self.ups.append(
+                # nn.utils.parametrizations.weight_norm(
                 nn.utils.weight_norm(
                     nn.ConvTranspose1d(
                         hp.gen.upsample_initial_channel // (2 ** i),
@@ -72,7 +81,7 @@ class Generator(torch.nn.Module):
                         k,
                         u,
                         padding=(k - u) // 2)
-                )
+                )  # 之前模型用nn.utils.weight_norm定义的，save的模型在用新的api nn.utils.parametrizations.weight_norm重新定义了以后不能直接load。
             )
             # nsf
             if i + 1 < len(hp.gen.upsample_rates):
@@ -107,18 +116,27 @@ class Generator(torch.nn.Module):
         self.ups.apply(init_weights)
 
     def forward(self, spk, x, f0):
+        """
+        Args:
+        spk: [B, D], D=256
+        x: [B, D, T], D=192, T means frames
+        f0: [B, T] T means frames
+
+        Return:
+        x: [B, 1, T*320]
+        """
         # Perturbation
-        x = x + torch.randn_like(x)
+        x = x + torch.randn_like(x)  # [b, h, t]
         # adapter
         x = self.adapter(x, spk)
         x = self.conv_pre(x)
         x = x * torch.tanh(F.softplus(x))
         # nsf
-        f0 = f0[:, None]
-        f0 = self.f0_upsamp(f0).transpose(1, 2)
+        f0 = f0[:, None]  # [B,1,T]
+        f0 = self.f0_upsamp(f0).transpose(1, 2)  # [B, T*320, 1]
         # 引入pitch信息用来更好拟合非语言的信号。Harmonic信号，多次谐波sin信号
         har_source = self.m_source(f0)
-        har_source = har_source.transpose(1, 2)
+        har_source = har_source.transpose(1, 2)  # [B, 1, T*320]
 
         for i in range(self.num_upsamples):
             # upsampling
