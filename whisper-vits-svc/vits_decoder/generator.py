@@ -118,8 +118,8 @@ class Generator(torch.nn.Module):
     def forward(self, spk, x, f0):
         """
         Args:
-        spk: [B, D], D=256
-        x: [B, D, T], D=192, T means frames
+        spk: [B, D], D=256, timber
+        x: [B, D, T], D=192, T means frames, wav signal
         f0: [B, T] T means frames
 
         Return:
@@ -128,7 +128,7 @@ class Generator(torch.nn.Module):
         # Perturbation
         x = x + torch.randn_like(x)  # [b, h, t]
         # adapter
-        x = self.adapter(x, spk)
+        x = self.adapter(x, spk)  # x和spk信息混叠到一起
         x = self.conv_pre(x)
         x = x * torch.tanh(F.softplus(x))
         # nsf

@@ -74,7 +74,7 @@ class SnakeBeta(nn.Module):
             self.beta = Parameter(torch.ones(in_features) * alpha)
         self.alpha.requires_grad = alpha_trainable
         self.beta.requires_grad = alpha_trainable
-        self.no_div_by_zero = 0.000000001
+        self.no_div_by_zero = 0.000000001  # 为了防止除0
 
     def forward(self, x):
         '''

@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-
 from torch.nn import Conv1d
 from torch.nn.utils import (remove_weight_norm, weight_norm)
 # from torch.nn.utils.parametrizations import (weight_norm)
+
 from .alias.act import SnakeAlias
 
 
@@ -60,11 +60,11 @@ class AMPBlock(torch.nn.Module):
         # Perturbation
         acts1, acts2 = self.activations[::2], self.activations[1::2]
         for c1, c2, a1, a2 in zip(self.convs1, self.convs2, acts1, acts2):
-            xt = a1(x)
-            xt = c1(xt)
+            xt = a1(x)  # 蛇形激活
+            xt = c1(xt)  # conv +weightnormal
             xt = a2(xt)
             xt = c2(xt)
-            x = xt + x
+            x = xt + x  # Residual connection
         return x
 
     def remove_weight_norm(self):
