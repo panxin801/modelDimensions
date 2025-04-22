@@ -304,9 +304,9 @@ class ResidualCouplingLayer(nn.Module):
             m, logs = torch.split(stats, [self.half_channels] * 2, 1)
         else:
             m = stats
-            logs = torch.zeros_like(m)
+            logs = torch.zeros_like(m)  # mean only时， std=1 logstd=0
 
-        if not reverse:
+        if not reverse:  # 正向（z_q做为输入）
             # x1 norm before affine xform
             x1_norm = (x1 - speaker_m) * torch.exp(-speaker_v) * x_mask
             x1 = (m + x1_norm * torch.exp(logs)) * x_mask
@@ -315,7 +315,7 @@ class ResidualCouplingLayer(nn.Module):
             logdet = torch.sum(logs * x_mask, [1, 2]) - torch.sum(
                 speaker_v.expand(-1, -1, logs.size(-1)) * x_mask, [1, 2])
             return x, logdet
-        else:
+        else:  # 反向过程（z_P做为输入）
             x1 = (x1 - m) * torch.exp(-logs) * x_mask
             # x1 denorm before output
             x1 = (speaker_m + x1 * torch.exp(speaker_v)) * x_mask
