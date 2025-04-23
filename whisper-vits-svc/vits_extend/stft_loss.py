@@ -75,8 +75,8 @@ class STFTLoss(torch.nn.Module):
         self.shift_size = shift_size
         self.win_length = win_length
         self.window = getattr(torch, window)(win_length).to(device)
-        self.spectral_convergenge_loss = SpectralConvergengeLoss()
-        self.log_stft_magnitude_loss = LogSTFTMagnitudeLoss()
+        self.spectral_convergenge_loss = SpectralConvergengeLoss()  # 谱收敛损失
+        self.log_stft_magnitude_loss = LogSTFTMagnitudeLoss()  # log幅度损失
 
     def forward(self, x, y):
         """Calculate forward propagation.

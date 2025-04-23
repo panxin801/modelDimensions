@@ -193,7 +193,9 @@ class SynthesizerTrn(nn.Module):
         audio = self.dec(spk, z_slice, pit_slice)
 
         # SNAC to flow
+        # z_r 是z_p经过反向flow得到的结果
         z_r, logdet_r = self.flow(z_p, spec_mask, g=spk, reverse=True)
+        # z_f 是z_q经过正向flow得到的结果
         z_f, logdet_f = self.flow(z_q, spec_mask, g=spk)
         # speaker
         spk_preds = self.speaker_classifier(x)

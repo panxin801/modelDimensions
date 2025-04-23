@@ -197,7 +197,7 @@ def train(rank, args, checkpoint_path, hp, hp_str):
                 audio, ids_slice * hp.data.hop_length, hp.data.segment_size)  # slice
             # Spk Loss
             spk_loss = spkc_criterion(spk, spk_preds, torch.Tensor(spk_preds.size(0))
-                                      .to(device).fill_(1.0))
+                                      .to(device).fill_(1.0))  # fill_(1.0)相当于cos_embedding_loss 中y=1的情况
             # Mel Loss
             mel_fake = stft.mel_spectrogram(fake_audio.squeeze(1))
             mel_real = stft.mel_spectrogram(audio.squeeze(1))
@@ -226,13 +226,14 @@ def train(rank, args, checkpoint_path, hp, hp_str):
 
             # Kl Loss
             loss_kl_f = kl_loss(z_f, logs_q, m_p, logs_p,
-                                logdet_f, z_mask) * hp.train.c_kl
+                                logdet_f, z_mask) * hp.train.c_kl  # q||p
             loss_kl_r = kl_loss(z_r, logs_p, m_q, logs_q,
-                                logdet_r, z_mask) * hp.train.c_kl
+                                logdet_r, z_mask) * hp.train.c_kl  # p||q
 
             # Loss
             loss_g = score_loss + feat_loss + mel_loss + \
-                stft_loss + loss_kl_f + loss_kl_r * 0.5 + spk_loss * 2
+                stft_loss + loss_kl_f + loss_kl_r * 0.5 + spk_loss * \
+                2  # loss_kl_f 也就是q到p是主要的，因此系数1,后边p到q是次要的因此系数0.5
             loss_g.backward()
 
             if ((step + 1) % hp.train.accum_step == 0) or (step + 1 == len(loader)):
