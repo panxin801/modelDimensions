@@ -30,7 +30,7 @@ def create_retrival(cli_args) -> IRetrieval:
     else:
         logger.info("load index retrival model")
 
-    speaker_name = get_speaker_name_from_path(Path(args.spk))
+    speaker_name = get_speaker_name_from_path(Path(cli_args.spk))
     base_path = Path(".").absolute() / "data_svc" / "indexes" / speaker_name
 
     if cli_args.hubert_index_path:
@@ -95,7 +95,7 @@ def svc_infer(model, retrieval: IRetrieval, spk, pit, ppg, vec, hp, device):
 
         hop_size = hp.data.hop_length
         all_frame = len_min
-        hop_frame = 10
+        hop_frame = 10  # 在out_chunk两个各补10帧，为了处理边界上采样的问题，输出时实际就用out_chunk大小。
         out_chunk = 2500  # 25 S
         out_index = 0
         out_audio = []

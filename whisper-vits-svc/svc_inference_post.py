@@ -1,11 +1,13 @@
-import sys, os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import sys
+import os
 import torch
 import librosa
 import argparse
 import numpy as np
 from scipy.io.wavfile import write
-from vad.utils import init_jit_model, get_speech_timestamps
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from vad.utils import (init_jit_model, get_speech_timestamps)
 
 
 def load_audio(file: str, sr: int = 16000):
