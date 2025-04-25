@@ -90,7 +90,7 @@ class MultiHeadAttention(nn.Module):
         self.out_channels = out_channels  # 192
         self.n_heads = n_heads  # 2
         self.p_dropout = p_dropout  # 0.1
-        self.window_size = window_size  # 4
+        self.window_size = window_size  # 4， self-attention相对位置编码的窗口大小
         self.heads_share = heads_share  # True
         self.block_length = block_length  # None
         self.proximal_bias = proximal_bias  # False
@@ -147,11 +147,11 @@ class MultiHeadAttention(nn.Module):
         scores = torch.matmul(
             query / math.sqrt(self.k_channels), key.transpose(-2, -1))  # q/sqrt(dim)*k.T
 
-        # 用窗口对长序列做平滑
+        # self-attention相对位置编码
         if not self.window_size is None:
             assert t_s == t_t, "Relative attention is only available for self-attention."
             key_relative_embeddings = self._get_relative_embeddings(
-                self.emb_rel_k, t_s)
+                self.emb_rel_k, t_s)  # 构建相对位置编码矩阵
             rel_logits = self._matmul_with_relative_keys(
                 query / math.sqrt(self.k_channels), key_relative_embeddings)
             score_logits = self._relative_position_to_absolute_position(
