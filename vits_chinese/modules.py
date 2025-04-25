@@ -16,7 +16,7 @@ class LayerNorm(nn.Module):
         self.channels = channels
         self.eps = eps
 
-        self.gamma = nn.Parameter(torch.ones(channels))
+        self.gamma = nn.Parameter(torch.ones(channels))  # 定义的可学习参数
         self.beta = nn.Parameter(torch.zeros(channels))
 
     def forward(self, x):

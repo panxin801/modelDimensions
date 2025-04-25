@@ -333,8 +333,8 @@ class TextEncoder(nn.Module):
         self.kernel_size = kernel_size  # 3
         self.p_dropout = p_dropout  # 0.1
 
-        self.emb = nn.Embedding(
-            self.n_vocab, self.hidden_channels)  # 单词映射成embedding向量
+        # 单词映射成embedding向量， n_vocab个单词，每个单词维度是hidden_channels
+        self.emb = nn.Embedding(self.n_vocab, self.hidden_channels)
         nn.init.normal_(self.emb.weight, 0.0,
                         hidden_channels**-0.5)  # 权重进行正态分布初始化
 
@@ -366,6 +366,8 @@ class TextEncoder(nn.Module):
             commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)  # x_mask.size()=[b,1,t]=[1,1,199]
 
         # after encoder x.size()=[b,hidden,t]=[1,192,199]
+        # 为了确保在计算统计量（stats）时，只有有效的音素位置被考虑，而忽略填充的位置。
+        # x_mask 中的值在有效位置为1，而在填充位置为0。
         x = self.encoder(x * x_mask, x_mask)
         stats = self.proj(x) * x_mask  # stats=[b,2*hidden,t]=[1,384,199]
 

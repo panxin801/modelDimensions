@@ -38,6 +38,7 @@ class Encoder(nn.Module):
                                                        self.n_heads,
                                                        p_dropout=self.p_dropout,
                                                        window_size=self.window_size))
+            # 为什么是layernorm？因为输入文本长度不一样
             self.norm_layers_1.append(LayerNorm(self.hidden_channels))
             self.ffn_layers.append(FFN(self.hidden_channels,
                                        self.hidden_channels,
@@ -114,10 +115,15 @@ class MultiHeadAttention(nn.Module):
         nn.init.xavier_uniform_(self.conv_q.weight)
         nn.init.xavier_uniform_(self.conv_k.weight)
         nn.init.xavier_uniform_(self.conv_v.weight)
+        # 用于控制是否进行近邻初始化（proximity initialization）。
+        # 在self_attention中，近邻初始化是一种初始化技巧，旨在让模型在初始训练阶段更好地捕捉局部信息。
+        # 具体来说，近邻初始化会将查询（query）和键（key）的权重初始化为相同，
+        # 从而使得模型在初始阶段更倾向于关注局部位置的信息。
+        # 这样可以有助于模型在开始训练时更好地对齐和处理相邻的音素或词，从而加速收敛。
         if self.proximal_init:
             with torch.no_grad():
                 self.conv_k.weight.copy_(self.conv_q.weight)
-                self.conv_v.bias.copy_(self.conv_q.bias)
+                self.conv_k.bias.copy_(self.conv_q.bias)
 
     def forward(self, x, c, attn_mask=None):
         q = self.conv_q(x)
@@ -139,7 +145,9 @@ class MultiHeadAttention(nn.Module):
                            t_s).transpose(2, 3)
 
         scores = torch.matmul(
-            query / math.sqrt(self.k_channels), key.transpose(-2, -1))
+            query / math.sqrt(self.k_channels), key.transpose(-2, -1))  # q/sqrt(dim)*k.T
+
+        # 用窗口对长序列做平滑
         if not self.window_size is None:
             assert t_s == t_t, "Relative attention is only available for self-attention."
             key_relative_embeddings = self._get_relative_embeddings(
@@ -160,9 +168,11 @@ class MultiHeadAttention(nn.Module):
                 block_mask = torch.ones_like(
                     scores).triu(-self.block_length).tril(self.block_length)
                 scores = scores.mask_fill(block_mask == 0, -1e4)
+
         p_attn = F.softmax(scores, dim=-1)  # [b, n_h, t_t, t_s]
         p_attn = self.drop(p_attn)
         output = torch.matmul(p_attn, value)
+
         if not self.window_size is None:
             relative_weights = self._absolute_position_to_relative_position(
                 p_attn)
@@ -170,6 +180,7 @@ class MultiHeadAttention(nn.Module):
                 self.emb_rel_v, t_s)
             output = output + self._matmul_with_relative_values(
                 relative_weights, value_relative_embeddings)
+
         output = output.transpose(2, 3).contiguous().view(
             b, d, t_t)  # [b, n_h, t_t, d_k] -> [b, d, t_t]
         return output, p_attn
@@ -256,7 +267,7 @@ class MultiHeadAttention(nn.Module):
         return torch.unsqueeze(torch.unsqueeze(-torch.log1p(torch.abs(diff)), 0), 0)
 
 
-class FFN(nn.Module):
+class FFN(nn.Module):  # Feed forward network
     def __init__(self,
                  in_channels,
                  out_channels,
