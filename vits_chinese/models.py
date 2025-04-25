@@ -309,7 +309,7 @@ class PosteriorEncoder(nn.Module):
         x = self.enc(x, x_mask, g=g)  # 加入sid作为条件
         stats = self.proj(x) * x_mask  # proj映射x到两个统计量
         m, logs = torch.split(stats, self.out_channels, dim=1)
-        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask  # 重参数化采样得到的z
+        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask  # 采样(重参数化)得到的z
         return z, m, logs, x_mask
 
 

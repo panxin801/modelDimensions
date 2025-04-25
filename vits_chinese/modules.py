@@ -118,7 +118,7 @@ class WN(torch.nn.Module):
             cond_layer = torch.nn.Conv1d(
                 gin_channels, 2 * hidden_channels * n_layers, 1)
             self.cond_layer = nn.utils.weight_norm(
-                cond_layer, name='weight')
+                cond_layer, name='weight')  # weight=g*(v/||v||), g是大小，v是方向
 
         for i in range(n_layers):
             dilation = dilation_rate ** i
