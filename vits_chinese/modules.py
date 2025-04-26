@@ -238,6 +238,7 @@ class ResidualCouplingLayer(nn.Module):
             m, logs = torch.split(stats, [self.half_channels] * 2, 1)
         else:
             m = stats
+            # mean only, std=1, log std=0
             logs = torch.zeros_like(m)
 
         if not reverse:

@@ -564,10 +564,10 @@ class ResidualCouplingBlock(nn.Module):
         """
 
         if not reverse:
-            for flow in self.flows:
+            for flow in self.flows:  # 正向q->p
                 x, _ = flow(x, x_mask, g=g, reverse=reverse)
         else:
-            for flow in reversed(self.flows):
+            for flow in reversed(self.flows):  # 反向p->q
                 x = flow(x, x_mask, g=g, reverse=reverse)
         return x
 
