@@ -46,6 +46,7 @@ class Log(nn.Module):
         """
         if not reverse:
             y = torch.log(torch.clamp_min(x, 1e-5)) * x_mask
+            # y=log(x), y'=1/x, logy'=log(1/x)=-log(x)=-log(y)
             logdet = torch.sum(-y, [1, 2])
             return y, logdet
         else:
