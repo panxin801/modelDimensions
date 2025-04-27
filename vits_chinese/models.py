@@ -163,7 +163,8 @@ class SynthesizerTrn(nn.Module):
             g = None
 
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)  # z的时间维度和y一致
-        z_p = self.flow(z, y_mask, g=g)  # 后验中的z经过逆flow得到的z_p就是f(z,c)
+        # flow这行后验中的z经过逆flow得到的z_p就是f(z,c)， 这里加入g就是为了让flow可以去掉speaker的特征。
+        z_p = self.flow(z, y_mask, g=g)
 
         with torch.no_grad():
             # negative cross-entropy
@@ -257,13 +258,13 @@ class SynthesizerTrn(nn.Module):
         o = self.dec((z * y_mask)[:, :, :max_len], g=g)
         return o, attn, y_mask, (z, z_p, m_p, logs_p)
 
-    def voice_conversion(self, y, y_lengths, sid_src, sid_tgt):
+    def _conversion(self, y, y_lengths, sid_src, sid_tgt):
         assert self.n_speakers > 0, "n_speakers have to be larger than 0."
         g_src = self.emb_g(sid_src).unsqueeze(-1)
         g_tgt = self.emb_g(sid_tgt).unsqueeze(-1)
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g_src)
-        z_p = self.flow(z, y_mask, g=g_src)
-        z_hat = self.flow(z_p, y_mask, g=g_tgt, reverse=True)
+        z_p = self.flow(z, y_mask, g=g_src)  # 牛逼，6，去掉src音色
+        z_hat = self.flow(z_p, y_mask, g=g_tgt, reverse=True)  # 增加tgt音色
         o_hat = self.dec(z_hat * y_mask, g=g_tgt)
         return o_hat, y_mask, (z, z_p, z_hat)
 
