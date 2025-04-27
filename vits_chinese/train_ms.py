@@ -187,7 +187,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 y, ids_slice * hps.data.hop_length, hps.train.segment_size)  # slice
 
             # Discriminator
-            y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
+            y_d_hat_r, y_d_hat_g, _, _ = net_d(
+                y, y_hat.detach())  # detach是为了不让两套网络互相影响。
             with autocast(enabled=False):  # 计算loss这部分不走fp16
                 loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
                     y_d_hat_r, y_d_hat_g)
