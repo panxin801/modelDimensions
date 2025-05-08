@@ -15,5 +15,6 @@ Gpt-Sovits: Few-shot Voice conversion and TTS system
     - soft_vc_hubert: https://github.com/bshall/hubert
     - soft_vc_aouctic: https://github.com/bshall/acoustic-model
 - whisper-vits-svc: https://github.com/PlayVoice/whisper-vits-svc/tree/bigvgan-mix-v2
+- bert_vits2: https://github.com/fishaudio/Bert-VITS2
 - gpt_sovits: https://github.com/RVC-Boss/GPT-SoVITS (Not started yet)
 

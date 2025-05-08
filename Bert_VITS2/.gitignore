@@ -1,0 +1,5 @@
+bert/*/*.bin
+slm/*/*.bin
+Bert-VITS2中日底模
+
+data/
