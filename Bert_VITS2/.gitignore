@@ -3,3 +3,4 @@ slm/*/*.bin
 Bert-VITS2中日底模
 
 data/
+__pycache__
