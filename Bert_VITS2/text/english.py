@@ -477,9 +477,9 @@ def g2p(text):
 
 
 def get_bert_feature(text, word2ph):
-    from text import english_bert_mock
+    from text import english_bert
 
-    return english_bert_mock.get_bert_feature(text, word2ph)
+    return english_bert.get_bert_feature(text, word2ph)
 
 
 if __name__ == "__main__":

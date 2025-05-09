@@ -49,18 +49,18 @@ def generate_config(data_dir, batch_size):
 def resample(data_dir):
     assert data_dir != "", "数据集名称不能为空"
 
-    # start_path, _, _, _, config_path = get_path(data_dir)
-    # in_dir = os.path.join(start_path, "raw")
-    # out_dir = os.path.join(start_path, "wavs")
-    # subprocess.run(["python",
-    #                 "resample_legacy.py",
-    #                 "--sr",
-    #                 "44100",
-    #                 "--in_dir",
-    #                 f"{in_dir}",
-    #                 "--out_dir",
-    #                 f"{out_dir}",]
-    #                )
+    start_path, _, _, _, config_path = get_path(data_dir)
+    in_dir = os.path.join(start_path, "raw")
+    out_dir = os.path.join(start_path, "wavs")
+    subprocess.run(["python",
+                    "resample_legacy.py",
+                    "--sr",
+                    "44100",
+                    "--in_dir",
+                    f"{in_dir}",
+                    "--out_dir",
+                    f"{out_dir}",]
+                   )
     return True
 
 
@@ -87,6 +87,19 @@ def preprocess_text(data_dir):
                     f"{val_path}",
                     "--config-path",
                     f"{config_path}",]
+                   )
+    return True
+
+
+def bert_gen(data_dir):
+    assert data_dir != "", "数据集名称不能为空"
+    _, _, _, _, config_path = get_path(data_dir)
+    subprocess.run(["python",
+                    "bert_gen.py",
+                    "--config",
+                    f"{config_path}",
+                    "--num_processes",
+                    "2",]
                    )
     return True
 
@@ -131,9 +144,9 @@ if __name__ == "__main__":
     "```\n"
     '''
 
-    data_dir = "LJ0508"
     # 第一步：生成配置文件
     # 批大小（Batch size）：24 GB 显存可用 12
+    data_dir = "LJ0508"
     batch_size = 3
     result = generate_config(data_dir, batch_size)
     if not result:
@@ -141,6 +154,17 @@ if __name__ == "__main__":
 
     # 第二步：预处理音频文件
     result = resample(data_dir)
+    if not result:
+        sys.exit(1)
 
     # 第三步：预处理标签文件
     result = preprocess_text(data_dir)
+    if not result:
+        sys.exit(1)
+
+    # 第四步：生成 BERT 特征文件
+    result = bert_gen(data_dir)
+    if not result:
+        sys.exit(1)
+
+    print("数据预处理完成！")
