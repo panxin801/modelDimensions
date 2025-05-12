@@ -6,6 +6,7 @@ import sys
 import os
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import torch.nn.functional as F
 import torch.utils.data as dataC
 import torch.distributed as dist
@@ -22,9 +23,9 @@ from data_utils import (TextAudioSpeakerLoader,
                         DistributedBucketSampler,)
 from models import (
     SynthesizerTrn,
-    # MultiPeriodDiscriminator,
+    MultiPeriodDiscriminator,
     DurationDiscriminator,
-    # WavLMDiscriminator,
+    WavLMDiscriminator,
 )
 from text.symbols import symbols
 
@@ -189,6 +190,62 @@ def run():
         noise_scale_delta=noise_scale_delta,
         **hps.model,
     ).cuda(local_rank)
+
+    if getattr(hps.train, "freeze_ZH_bert", False):
+        print("Freezing ZH bert encoder !!!")
+        for param in net_g.enc_p.bert_proj.parameters():
+            param.requires_grad = False
+
+    if getattr(hps.train, "freeze_EN_bert", False):
+        print("Freezing EN bert encoder !!!")
+        for param in net_g.enc_p.en_bert_proj.parameters():
+            param.requires_grad = False
+
+    if getattr(hps.train, "freeze_JP_bert", False):
+        print("Freezing JP bert encoder !!!")
+        for param in net_g.enc_p.ja_bert_proj.parameters():
+            param.requires_grad = False
+
+    net_d = MultiPeriodDiscriminator(
+        hps.train.use_spectral_norm).cuda(local_rank)
+    net_wd = WavLMDiscriminator(
+        hps.model.slm.hidden, hps.model.slm.nlayers, hps.model.slm.initial_channel).cuda(local_rank)
+
+    optim_g = optim.AdamW(filter(lambda p: p.requires_grad, net_g.parameters()),
+                          hps.train.learning_rate,
+                          betas=hps.train.betas,
+                          eps=hps.train.eps)
+    optim_d = optim.AdamW(net_d.parameters(),
+                          hps.train.learning_rate,
+                          betas=hps.train.betas,
+                          eps=hps.train.eps)
+    optim_wd = optim.AdamW(net_wd.parameters(),
+                           hps.train.learning_rate,
+                           betas=hps.train.betas,
+                           eps=hps.train.eps)
+    if not net_dur_disc is None:
+        optim_dur_disc = optim.AdamW(net_dur_disc.parameters(),
+                                     hps.train.learning_rate,
+                                     betas=hps.train.betas,
+                                     eps=hps.train.eps)
+    else:
+        optim_dur_disc = None
+
+    net_g = DDP(net_g, device_ids=[local_rank], bucket_cap_mb=512)
+    net_d = DDP(net_d, device_ids=[local_rank], bucket_cap_mb=512)
+    net_wd = DDP(net_wd, device_ids=[local_rank], bucket_cap_mb=512)
+    if not net_dur_disc is None:
+        net_dur_disc = DDP(net_dur_disc, device_ids=[
+                           local_rank], bucket_cap_mb=512)
+
+    # 下载底模
+    if config.train_ms_config.base["use_base_model"]:
+        utils.download_checkpoint(
+            hps.model_dir,
+            config.train_ms_config.base,
+            token=config.openi_token,
+            mirror=config.mirror,
+        )
 
 
 if __name__ == "__main__":
