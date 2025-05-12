@@ -5,12 +5,84 @@ import shutil
 import logging
 import torch
 import subprocess
+import re
 import numpy as np
 from scipy.io.wavfile import read
 
 MATPLOTLIB_FLAG = False
 
 logger = logging.getLogger(__name__)
+
+
+def load_checkpoint(checkpoint_path, model, optimizer=None, skip_optimizer=False):
+    assert os.path.isfile(checkpoint_path)
+    checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")
+    iteration = checkpoint_dict["iteration"]
+    learning_rate = checkpoint_dict["learning_rate"]
+    if (
+        optimizer is not None
+        and not skip_optimizer
+        and checkpoint_dict["optimizer"] is not None
+    ):
+        optimizer.load_state_dict(checkpoint_dict["optimizer"])
+    elif optimizer is None and not skip_optimizer:
+        # else:      Disable this line if Infer and resume checkpoint,then enable the line upper
+        new_opt_dict = optimizer.state_dict()
+        new_opt_dict_params = new_opt_dict["param_groups"][0]["params"]
+        new_opt_dict["param_groups"] = checkpoint_dict["optimizer"]["param_groups"]
+        new_opt_dict["param_groups"][0]["params"] = new_opt_dict_params
+        optimizer.load_state_dict(new_opt_dict)
+
+    saved_state_dict = checkpoint_dict["model"]
+    if hasattr(model, "module"):
+        state_dict = model.module.state_dict()
+    else:
+        state_dict = model.state_dict()
+
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        try:
+            # assert "emb_g" not in k
+            new_state_dict[k] = saved_state_dict[k]
+            assert saved_state_dict[k].shape == v.shape, (
+                saved_state_dict[k].shape,
+                v.shape,
+            )
+        except:
+            # For upgrading from the old version
+            if "ja_bert_proj" in k:
+                v = torch.zeros_like(v)
+                logger.warn(
+                    f"Seems you are using the old version of the model, the {k} is automatically set to zero for backward compatibility"
+                )
+            else:
+                logger.error(f"{k} is not in the checkpoint")
+
+            new_state_dict[k] = v
+
+    if hasattr(model, "module"):
+        model.module.load_state_dict(new_state_dict, strict=False)
+    else:
+        model.load_state_dict(new_state_dict, strict=False)
+
+    logger.info(
+        "Loaded checkpoint '{}' (iteration {})".format(
+            checkpoint_path, iteration)
+    )
+
+    return model, optimizer, learning_rate, iteration
+
+
+def get_steps(model_path):
+    matches = re.findall(r"\d+", model_path)
+    return matches[-1] if matches else None
+
+
+def latest_checkpoint_path(dir_path, regex="G_*.pth"):
+    f_list = glob.glob(os.path.join(dir_path, regex))
+    f_list.sort(key=lambda f: int("".join(filter(str.isdigit, f))))
+    x = f_list[-1]
+    return x
 
 
 def download_checkpoint(

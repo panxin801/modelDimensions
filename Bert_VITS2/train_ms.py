@@ -28,7 +28,13 @@ from models import (
     WavLMDiscriminator,
 )
 from text.symbols import symbols
-
+from losses import (
+    generator_loss,
+    discriminator_loss,
+    feature_loss,
+    kl_loss,
+    WavLMLoss,
+)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 # If encountered training problem,please try to disable TF32.
@@ -246,6 +252,148 @@ def run():
             token=config.openi_token,
             mirror=config.mirror,
         )
+    dur_resume_lr = hps.train.learning_rate
+    wd_resume_lr = hps.train.learning_rate
+    if not net_dur_disc is None:
+        try:
+            _, _, dur_resume_lr, epoch_str = utils.load_checkpoint(
+                utils.latest_checkpoint_path(hps.model_dir, "DUR_*.pth"),
+                net_dur_disc,
+                optim_dur_disc,
+                skip_optimizer=(
+                    hps.train.skip_optimizer if "skip_optimizer" in hps.train else True
+                ),
+            )
+            if not optim_dur_disc.param_groups[0].get("initial_lr"):
+                optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
+        except:
+            print("Initialize dur_disc")
+
+    try:
+        _, optim_g, g_resume_lr, epoch_str = utils.load_checkpoint(
+            utils.latest_checkpoint_path(hps.model_dir, "G_*.pth"),
+            net_g,
+            optim_g,
+            skip_optimizer=(
+                hps.train.skip_optimizer if "skip_optimizer" in hps.train else True
+            ),
+        )
+        _, optim_d, d_resume_lr, epoch_str = utils.load_checkpoint(
+            utils.latest_checkpoint_path(hps.model_dir, "D_*.pth"),
+            net_d,
+            optim_d,
+            skip_optimizer=(
+                hps.train.skip_optimizer if "skip_optimizer" in hps.train else True
+            ),
+        )
+        if not optim_g.param_groups[0].get("initial_lr"):
+            optim_g.param_groups[0]["initial_lr"] = g_resume_lr
+        if not optim_d.param_groups[0].get("initial_lr"):
+            optim_d.param_groups[0]["initial_lr"] = d_resume_lr
+
+        epoch_str = max(epoch_str, 1)
+        # global_step = (epoch_str - 1) * len(train_loader)
+        global_step = int(
+            utils.get_steps(utils.latest_checkpoint_path(
+                hps.model_dir, "G_*.pth"))
+        )
+        print(
+            f"******************检测到模型存在，epoch为 {epoch_str}，gloabl step为 {global_step}*********************"
+        )
+    except Exception as e:
+        print(e)
+        epoch_str = 1
+        global_step = 0
+
+    try:
+        _, optim_wd, wd_resume_lr, epoch_str = utils.load_checkpoint(
+            utils.latest_checkpoint_path(hps.model_dir, "WD_*.pth"),
+            net_wd,
+            optim_wd,
+            skip_optimizer=(
+                hps.train.skip_optimizer if "skip_optimizer" in hps.train else True
+            ),
+        )
+        if not optim_wd.param_groups[0].get("initial_lr"):
+            optim_wd.param_groups[0]["initial_lr"] = wd_resume_lr
+    except Exception as e:
+        print(e)
+
+    scheduler_g = optim.lr_scheduler.ExponentialLR(
+        optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
+    )
+    scheduler_d = optim.lr_scheduler.ExponentialLR(
+        optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
+    )
+    scheduler_wd = optim.lr_scheduler.ExponentialLR(
+        optim_wd, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
+    )
+    if net_dur_disc is not None:
+        scheduler_dur_disc = optim.lr_scheduler.ExponentialLR(
+            optim_dur_disc, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
+        )
+    else:
+        scheduler_dur_disc = None
+
+    scaler = GradScaler(enabled=hps.train.bf16_run)
+
+    wl = WavLMLoss(
+        hps.model.slm.model,
+        net_wd,
+        hps.data.sampling_rate,
+        hps.model.slm.sr
+    ).cuda(local_rank)
+
+    for epoch in range(epoch_str, hps.train.epochs + 1):
+        if rank == 0:
+            train_and_evaluate(
+                rank,
+                local_rank,
+                epoch,
+                hps,
+                [net_g, net_d, net_dur_disc, net_wd, wl],
+                [optim_g, optim_d, optim_dur_disc, optim_wd],
+                [scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd],
+                scaler,
+                [train_loader, eval_loader],
+                logger,
+                [writer, writer_eval],
+            )
+        else:
+            train_and_evaluate(
+                rank,
+                local_rank,
+                epoch,
+                hps,
+                [net_g, net_d, net_dur_disc, net_wd, wl],
+                [optim_g, optim_d, optim_dur_disc, optim_wd],
+                [scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd],
+                scaler,
+                [train_loader, None],
+                None,
+                None,
+            )
+        scheduler_g.step()
+        scheduler_d.step()
+        scheduler_wd.step()
+        if not net_dur_disc is None:
+            scheduler_dur_disc.step()
+
+
+def train_and_evaluate(
+    rank,
+    local_rank,
+    epoch,
+    hps,
+    nets,
+    optims,
+    schedulers,
+    scaler,
+    loaders,
+    logger,
+    writers,
+):
+    ...
 
 
 if __name__ == "__main__":
