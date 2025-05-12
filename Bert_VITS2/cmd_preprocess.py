@@ -148,6 +148,7 @@ if __name__ == "__main__":
     # 批大小（Batch size）：24 GB 显存可用 12
     data_dir = "LJ0508"
     batch_size = 3
+
     result = generate_config(data_dir, batch_size)
     if not result:
         sys.exit(1)
