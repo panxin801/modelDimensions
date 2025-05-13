@@ -55,10 +55,10 @@ class WavLMLoss(nn.Module):
         return loss_gen
 
     def discriminator(self, wav, y_rec):
-        with torch.inference_mode():
+        with torch.no_grad():
             wav_16 = self.resample(wav)
             wav_embeddings = self.wavlm(
-                nput_values=wav_16, output_hidden_states=True).hidden_states
+                input_values=wav_16, output_hidden_states=True).hidden_states
             y_rec_16 = self.resample(y_rec)
             y_rec_embeddings = self.wavlm(
                 input_values=y_rec_16, output_hidden_states=True
@@ -88,7 +88,7 @@ class WavLMLoss(nn.Module):
         return loss_disc_f.mean()
 
     def discriminator_forward(self, wav):
-        with torch.inference_mode():
+        with torch.no_grad():
             wav_16 = self.resample(wav)
             wav_embeddings = self.wavlm(
                 input_values=wav_16, output_hidden_states=True

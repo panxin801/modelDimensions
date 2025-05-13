@@ -42,11 +42,11 @@ class DurationDiscriminator(nn.Module):  # vits2
     def forward_probability(self, x, dur):
         """
         Args:
-        x: [B, L]=[1, 199], 199是文本音素内容长度。x是文本音素
-        dur
+        x: [B,H,Ttext]
+        dur: [B,1,Ttext]
 
         Return:
-        output_prob: [B,1,Time]=【1,1,8192】
+        output_prob: [B,Ttext,1]
         """
         dur = self.dur_proj(dur)
         x = torch.cat([x, dur], dim=1)
@@ -58,14 +58,14 @@ class DurationDiscriminator(nn.Module):  # vits2
     def forward(self, x, x_mask, dur_r, dur_hat, g=None):
         """
         Args:
-        x: [B, L]=[1, 199], 199是文本音素内容长度。x是文本音素
-        x_mask
-        dur_r
-        dur_hat
-        g
+        x: [B,H,Ttext]
+        x_mask: [B,1,Ttext]
+        dur_r: [B,1,Ttext]
+        dur_hat: [B,1,Ttext]
+        g: [B,gin_channels,1]
 
         Return:
-        output_probs: [B,1,Time]=【1,1,8192】
+        output_probs: len=2
         """
         x = torch.detach(x)
         if not g is None:
@@ -84,10 +84,10 @@ class DurationDiscriminator(nn.Module):  # vits2
 
         output_probs = []
         for dur in [dur_r, dur_hat]:
-            output_prob = self.forward_probability(x, dur)
+            output_prob = self.forward_probability(x, dur)  # [B,Ttext,1]
             output_probs.append(output_prob)
 
-        return output_probs
+        return output_probs  # len=2
 
 
 class TransformerCouplingBlock(nn.Module):
@@ -145,14 +145,24 @@ class TransformerCouplingBlock(nn.Module):
             self.flows.append(modules.Flip())
 
     def forward(self, x, x_mask, g=None, reverse=False):
+        """
+        Args:
+        x: [B,H,Tframe]
+        x_mask: [B,1,Tframe]
+        g: [B,gin_channels,1]
+        reverse: bool 
+
+        Return:
+        x: [B,H,Tframe]
+        """
         if not reverse:
             for flow in self.flows:
-                x, _ = flow(x, x_mask, g=g, reverse=reverse)
+                x, _ = flow(x, x_mask, g=g, reverse=reverse)  # [B,H,Tframe]
         else:
             for flow in reversed(self.flows):
-                x, _ = flow(x, x_mask, g=g, reverse=reverse)
+                x = flow(x, x_mask, g=g, reverse=reverse)
 
-        return x
+        return x  # [B,H,Tframe]
 
 
 class StochasticDurationPredictor(nn.Module):
@@ -206,47 +216,61 @@ class StochasticDurationPredictor(nn.Module):
             self.cond = nn.Conv1d(gin_channels, filter_channels, 1)
 
     def forward(self, x, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
+        """
+        Args:
+        x: [B, H, Ttext], 各种文本信息, 增加了speaker embedding作为condition
+        x_mask: [B, 1, Ttext], 文本信息mask
+        w: [B, 1, Ttext], 对齐信息，文本和线性谱的对齐
+        g: [B, gin_channels, 1], speaker embedding
+        reverse: bool
+        noise_scale: int
+
+        Return:
+        nll: [B]
+        logq: [B]
+        logw: [B,1,Ttext]
+        """
         x = torch.detach(x)
-        x = self.pre(x)
+        x = self.pre(x)  # [B, H, Ttext]
         if g is not None:
             g = torch.detach(g)
             x = x + self.cond(g)
         x = self.convs(x, x_mask)
-        x = self.proj(x) * x_mask
+        x = self.proj(x) * x_mask  # [B, H, Ttext]
 
         if not reverse:
             flows = self.flows
             assert w is not None
 
             logdet_tot_q = 0
-            h_w = self.post_pre(w)
+            h_w = self.post_pre(w)  # [B, H, Ttext]
             h_w = self.post_convs(h_w, x_mask)
-            h_w = self.post_proj(h_w) * x_mask
+            h_w = self.post_proj(h_w) * x_mask  # [B, H, Ttext]
             e_q = (
                 torch.randn(w.size(0), 2, w.size(2)).to(
                     device=x.device, dtype=x.dtype)
                 * x_mask
-            )
+            )  # [B,2,Ttext]
             z_q = e_q
             for flow in self.post_flows:
                 z_q, logdet_q = flow(z_q, x_mask, g=(x + h_w))
                 logdet_tot_q += logdet_q
-            z_u, z1 = torch.split(z_q, [1, 1], 1)
-            u = torch.sigmoid(z_u) * x_mask
+            z_u, z1 = torch.split(z_q, [1, 1], 1)  # [B, 1, Ttext]
+            u = torch.sigmoid(z_u) * x_mask  # [B, 1, Ttext]
             z0 = (w - u) * x_mask
             logdet_tot_q += torch.sum(
                 (F.logsigmoid(z_u) + F.logsigmoid(-z_u)) * x_mask, [1, 2]
-            )
+            )  # [B]
             logq = (
                 torch.sum(-0.5 * (math.log(2 * math.pi) + (e_q**2))
                           * x_mask, [1, 2])
                 - logdet_tot_q
-            )
+            )  # [B]
 
             logdet_tot = 0
             z0, logdet = self.log_flow(z0, x_mask)
             logdet_tot += logdet
-            z = torch.cat([z0, z1], 1)
+            z = torch.cat([z0, z1], 1)  # [B,2,Ttext]
             for flow in flows:
                 z, logdet = flow(z, x_mask, g=x, reverse=reverse)
                 logdet_tot = logdet_tot + logdet
@@ -254,7 +278,7 @@ class StochasticDurationPredictor(nn.Module):
                 torch.sum(0.5 * (math.log(2 * math.pi) + (z**2))
                           * x_mask, [1, 2])
                 - logdet_tot
-            )
+            )  # [B]
             return nll + logq  # [b]
         else:
             flows = list(reversed(self.flows))
@@ -267,7 +291,7 @@ class StochasticDurationPredictor(nn.Module):
             for flow in flows:
                 z = flow(z, x_mask, g=x, reverse=reverse)
             z0, z1 = torch.split(z, [1, 1], 1)
-            logw = z0
+            logw = z0  # [B,1,Ttext]
             return logw
 
 
@@ -298,6 +322,15 @@ class DurationPredictor(nn.Module):
             self.cond = nn.Conv1d(gin_channels, in_channels, 1)
 
     def forward(self, x, x_mask, g=None):
+        """
+        Args:
+        x: [B, h, Ttext], 各种文本信息, 增加了speaker embedding作为condition
+        x_mask: [B,1,Ttext]
+        g: [B,gin_channels,1], speaker embedding
+
+        Return:
+        x*x_mask: [B,1,Ttext]
+        """
         x = torch.detach(x)
         if g is not None:
             g = torch.detach(g)
@@ -311,7 +344,7 @@ class DurationPredictor(nn.Module):
         x = self.norm_2(x)
         x = self.drop(x)
         x = self.proj(x * x_mask)
-        return x * x_mask
+        return x * x_mask  # [B,1,Ttext]
 
 
 class TextEncoder(nn.Module):
@@ -363,23 +396,43 @@ class TextEncoder(nn.Module):
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
     def forward(self, x, x_lengths, tone, language, bert, ja_bert, en_bert, g=None):
-        bert_emb = self.bert_proj(bert).transpose(1, 2)
-        ja_bert_emb = self.ja_bert_proj(ja_bert).transpose(1, 2)
-        en_bert_emb = self.en_bert_proj(en_bert).transpose(1, 2)
+        """
+        Args:
+        x: [B, Ttext], 音素,Ttext是音素token序列长度
+        x_lengths: [B], 每个数据的音素 长度
+        tone: [B, Ttext], 音素对应的音调
+        language: [B, Ttext], 音素对应的语言
+        bert: [B, 1024, Ttext]: zh bert embedding
+        ja_bert: [B, 1024, Ttext], japan bert embedding
+        en_bert: [B, 1024, Ttext], english bert embedding
+        g: [B, gin_channels, 1]: speaker embedding
+
+        Return:
+        x: [B, h=192, Ttext], 各种文本信息, 增加了speaker embedding作为condition
+        m: [B, h=192, Ttext], prior mean
+        logs: [B, h=192, Ttext], prior log variance
+        x_mask: [B, 1, Ttext], 文本mask
+        """
+        bert_emb = self.bert_proj(bert).transpose(1, 2)  # [B, Ttext, 192]
+        ja_bert_emb = self.ja_bert_proj(
+            ja_bert).transpose(1, 2)  # [B, Ttext, 192]
+        en_bert_emb = self.en_bert_proj(
+            en_bert).transpose(1, 2)  # [B, Ttext, 192]
 
         x = (self.emb(x) +
              self.tone_emb(tone) +
              self.language_emb(language) +
              bert_emb +
              ja_bert_emb +
-             en_bert_emb) * math.sqrt(self.hidden_channels)  # [b,t,h]
-        x = torch.transpose(x, 1, -1)  # [b,h,t]
+             en_bert_emb) * math.sqrt(self.hidden_channels)  # [b,Ttext,h=192]
+        x = torch.transpose(x, 1, -1)  # [b,h=192,Ttext]
         x_mask = torch.unsqueeze(commons.sequence_mask(
-            x_lengths, x.size(2)), 1).to(x.dtype)
+            x_lengths, x.size(2)), 1).to(x.dtype)  # [B, 1, Ttext]
 
-        x = self.encoder(x * x_mask, x_mask, g=g)
-        stats = self.proj(x) * x_mask
+        x = self.encoder(x * x_mask, x_mask, g=g)  # [B, h=192, Ttext]
+        stats = self.proj(x) * x_mask  # [B, 2*h=384, Ttext]
 
+        # m, logs分别是 [B, h=192, Ttext]
         m, logs = torch.split(stats, self.out_channels, dim=1)
         return x, m, logs, x_mask
 
@@ -423,10 +476,10 @@ class ResidualCouplingBlock(nn.Module):
     def forward(self, x, x_mask, g=None, reverse=False):
         if not reverse:
             for flow in self.flows:
-                x, _ = self.flows(x, x_mask, g=g, reverse=reverse)
+                x, _ = flow(x, x_mask, g=g, reverse=reverse)
         else:
             for flow in reversed(self.flows):
-                x, _ = self.flows(x, x_mask, g=g, reverse=reverse)
+                x, _ = flow(x, x_mask, g=g, reverse=reverse)
         return x
 
 
@@ -462,14 +515,28 @@ class PosteriorEncoder(nn.Module):
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
     def forward(self, x, x_lengths, g=None):
-        x_mask = torch.unsqueeze(commons.sequence_mask(
-            x_lengths, x.size(2)), 1).to(x.dtype)
-        x = self.pre(x) * x_mask
-        x = self.enc(x, x_mask, g=g)
+        """
+        Args:
+        x: [B, H, Tframe], 线性谱
+        x_lengths: [B], 线性谱长度
+        g: [B, gin_channels, 1], speaker embedding
 
-        stats = self.proj(x) * x_mask
-        m, logs = torch.split(stats, self.out_channels, dim=1)
-        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
+        Return:
+        z: [B,192, Tframe], 后验采样
+        m: [B,192, Tframe], prior mean
+        logs: [B,192, Tframe], prior log variance
+        x_mask: [B,192, Tframe], 线性谱mask
+        """
+        x_mask = torch.unsqueeze(commons.sequence_mask(
+            x_lengths, x.size(2)), 1).to(x.dtype)  # [B,1,Tframe]
+        x = self.pre(x) * x_mask  # [B,192,Tframe]
+        x = self.enc(x, x_mask, g=g)  # [B,192,Tframe]
+
+        stats = self.proj(x) * x_mask  # [B,192*2, Tframe]
+        m, logs = torch.split(stats, self.out_channels,
+                              dim=1)  # [B,192, Tframe]
+        z = (m + torch.randn_like(m) * torch.exp(logs)) * \
+            x_mask  # [B,192, Tframe]
         return z, m, logs, x_mask
 
 
@@ -523,7 +590,15 @@ class Generator(torch.nn.Module):
             self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
 
     def forward(self, x, g=None):
-        x = self.conv_pre(x)
+        """
+        Args:
+        x: [B, H, segment_size]
+        g: [B,gin_channels,1]
+
+        Return:
+        x: [B,1,512*segment_size], wav samples
+        """
+        x = self.conv_pre(x)  # [B,512,segment_size]
         if g is not None:
             x = x + self.cond(g)
 
@@ -539,9 +614,9 @@ class Generator(torch.nn.Module):
             x = xs / self.num_kernels
         x = F.leaky_relu(x)
         x = self.conv_post(x)
-        x = torch.tanh(x)
+        x = torch.tanh(x)  # [B,1,512*segment_size]
 
-        return x
+        return x  # [B,1,512*segment_size]
 
     def remove_weight_norm(self):
         print("Removing weight norm...")
@@ -763,6 +838,39 @@ class SynthesizerTrn(nn.Module):
             ja_bert,
             en_bert,
     ):
+        """
+        Args:
+        x: [B, Ttext], 音素,Ttext是音素token序列长度 
+        x_lengths:[B], 每个数据的音素 长度 
+        y: [B,n_fft, Tframe], 线性谱,Tframe是帧数
+        y_lengths: [B], 每个数据的线性谱长度
+        sid: [B], 每个音频的speaker id
+        tone: [B, Ttext], 音素对应的音调
+        language: [B, Ttext], 音素对应的语言
+        bert: [B, 1024, Ttext], zh bert embedding
+        ja_bert: [B, 1024, Ttext], japan bert embedding
+        en_bert: [B, 1024, Ttext], english bert embedding
+
+        Return:
+        o: [B,1,upsample_times*segment_size]
+        l_length: [B]
+        attn: [B,1, Tframe, Ttext]
+        ids_slice: [B]
+        x_mask: [B,1,Ttext]
+        y_mask: [B,1,Tframe]
+        z: [B,H,Tframe]
+        z_p: [B,H,Tframe]
+        m_p: [B,H,Tframe] 
+        logs_p: [B,H,Tframe]
+        m_q: [B,H,Tframe] 
+        logs_q: [B,H,Tframe] 
+        x: [B,H, Ttext] 
+        logw: [B,1, Ttext]
+        logw_: [B,1, Ttext]
+        logw_sdp: [B,1, Ttext]
+        g: [B,gin_channels, 1]
+        """
+
         if self.n_speakers > 0:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
@@ -771,9 +879,19 @@ class SynthesizerTrn(nn.Module):
         # prior
         x, m_p, logs_p, x_mask = self.enc_p(
             x, x_lengths, tone, language, bert, ja_bert, en_bert, g=g)
+        # x: [B, h=192, Ttext], 各种文本信息, 增加了speaker embedding作为condition
+        # m_p: [B, h=192, Ttext], prior mean
+        # logs_p: [B, h=192, Ttext], prior log variance
+        # x_mask: [B, 1, Ttext], 文本mask
+
         # posterior
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
-        z_p = self.flow(z, y_mask, g=g)
+        # z: [B,192, Tframe], 后验采样
+        # m_q: [B,192, Tframe], prior mean
+        # logs_q: [B,192, Tframe], prior log variance
+        # y_mask: [B,192, Tframe], 线性谱mask
+
+        z_p = self.flow(z, y_mask, g=g)  # [B,H,Tframe]
 
         with torch.no_grad():
             # negative cross-entropy
@@ -801,35 +919,33 @@ class SynthesizerTrn(nn.Module):
 
             attn_mask = torch.unsqueeze(
                 x_mask, 2) * torch.unsqueeze(y_mask, -1)
-            attn = (
-                monotonic_align.maximum_path(neg_cent, attn_mask.squeeze(1))
-                .unsqueeze(1)
-                .detach()
-            )
+            attn = monotonic_align.maximum_path(
+                neg_cent, attn_mask.squeeze(1)).unsqueeze(1).detach()
 
-        w = attn.sum(2)
+        w = attn.sum(2)  # [B,1,Ttext]
 
         l_length_sdp = self.sdp(x, x_mask, w, g=g)
-        l_length_sdp = l_length_sdp / torch.sum(x_mask)
+        l_length_sdp = l_length_sdp / torch.sum(x_mask)  # [B]
 
         logw_ = torch.log(w + 1e-6) * x_mask
-        logw = self.dp(x, x_mask, g=g)
-        logw_sdp = self.sdp(x, x_mask, g=g, reverse=True, noise_scale=1.0)
+        logw = self.dp(x, x_mask, g=g)  # [B,1,Ttext]
+        logw_sdp = self.sdp(x, x_mask, g=g, reverse=True,
+                            noise_scale=1.0)  # [B,1,Ttext]
         l_length_dp = torch.sum(
             (logw - logw_)**2, [1, 2]) / torch.sum(x_mask)   # for averaging
         l_length_sdp += torch.sum((logw_sdp - logw_)
                                   ** 2, [1, 2]) / torch.sum(x_mask)
 
-        l_length = l_length_dp + l_length_sdp
+        l_length = l_length_dp + l_length_sdp  # [B]
 
         # expand prior
         m_p = torch.matmul(attn.squeeze(
-            1), m_p.transpose(1, 2)).transpose(1, 2)
+            1), m_p.transpose(1, 2)).transpose(1, 2)  # [B,H,Tframe]
         logs_p = torch.matmul(attn.squeeze(
             1), logs_p.transpose(1, 2)).transpose(1, 2)
         z_slice, ids_slice = commons.rand_slice_segments(
-            z, y_lengths, self.segment_size)
-        o = self.dec(z_slice, g=g)
+            z, y_lengths, self.segment_size)  # [B,H,self.segment_size]
+        o = self.dec(z_slice, g=g)  # [B,1,upsample_times*segment_size]
         return (
             o,
             l_length,
@@ -895,7 +1011,8 @@ class SynthesizerTrn(nn.Module):
 
 class DiscriminatorP(torch.nn.Module):
     def __init__(self, period, kernel_size=5, stride=3, use_spectral_norm=False):
-        super(DiscriminatorP, self).__init__()
+        super().__init__()
+
         self.period = period
         self.use_spectral_norm = use_spectral_norm
         norm_f = nn.utils.weight_norm if use_spectral_norm is False else nn.utils.spectral_norm
@@ -953,6 +1070,15 @@ class DiscriminatorP(torch.nn.Module):
         )
 
     def forward(self, x):
+        """
+        Args:
+        x: [B,1,segment_size*upsample_times]
+
+        Return:
+        x: [B,204]
+        fmap: len=6, each is [B,H, T, 2]
+        """
+
         fmap = []
 
         # 1d to 2d
@@ -976,7 +1102,8 @@ class DiscriminatorP(torch.nn.Module):
 
 class DiscriminatorS(torch.nn.Module):
     def __init__(self, use_spectral_norm=False):
-        super(DiscriminatorS, self).__init__()
+        super().__init__()
+
         norm_f = nn.utils.weight_norm if use_spectral_norm is False else nn.utils.spectral_norm
         self.convs = nn.ModuleList(
             [
@@ -991,6 +1118,15 @@ class DiscriminatorS(torch.nn.Module):
         self.conv_post = norm_f(nn.Conv1d(1024, 1, 3, 1, padding=1))
 
     def forward(self, x):
+        """
+        Args:
+        x: [B,1,segment_size*upsample_times]
+
+        Return:
+        x: [B,64]
+        fmap: len=7, each is [B,H,T]
+        """
+
         fmap = []
 
         for layer in self.convs:
@@ -1017,6 +1153,18 @@ class MultiPeriodDiscriminator(torch.nn.Module):
         self.discriminators = nn.ModuleList(discs)
 
     def forward(self, y, y_hat):
+        """
+        Args:
+        y: [B,1,segment_size*upsample_times]
+        y_hat: [B,1,segment_size*upsample_times]
+
+        Return:
+        y_d_rs: len=6, [B,H]
+        y_d_gs: len=6, [B,H]
+        fmap_rs: len=6, len=7 [B,H,T]
+        fmap_gs: len=6, len=7 [B,H,T]
+        """
+
         y_d_rs = []
         y_d_gs = []
         fmap_rs = []
@@ -1056,10 +1204,18 @@ class WavLMDiscriminator(nn.Module):
                        initial_channel * 4, 5, 1, padding=2)),
             ]
         )
-        self.convs_post = norm_f(
+        self.conv_post = norm_f(
             nn.Conv1d(initial_channel * 4, 1, 3, 1, padding=1))
 
     def forward(self, x):
+        """
+        Args:
+        x: [B,T,H]
+
+        Return:
+        x: [B,T]
+        """
+
         x = self.pre(x)
 
         fmap = []
@@ -1067,7 +1223,7 @@ class WavLMDiscriminator(nn.Module):
             x = l(x)
             x = F.leaky_relu(x, modules.LRELU_SLOPE)
             fmap.append(x)
-        x = self.convs_post(x)
+        x = self.conv_post(x)
         x = torch.flatten(x, 1, -1)
 
         return x

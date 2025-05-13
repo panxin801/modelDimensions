@@ -377,21 +377,33 @@ class TransformerCouplingLayer(nn.Module):
         self.post.bias.data.zero_()
 
     def forward(self, x, x_mask, g=None, reverse=False):
-        x0, x1 = torch.split(x, [self.half_channels] * 2, 1)
-        h = self.pre(x0) * x_mask
-        h = self.enc(h, x_mask, g=g)
-        stats = self.post(h) * x_mask
+        """
+        Args:
+        x: [B, H, Tframe]
+        x_mask: [B,1,Tframe]
+        g: [B,gin_channels,1]
+        reverse: bool
+
+        Return:
+        x: [B,H, Tframe]
+        logdet: [B]
+        """
+
+        x0, x1 = torch.split(x, [self.half_channels] * 2, 1)  # [B,H/2, Tframe]
+        h = self.pre(x0) * x_mask  # [B,H, Tframe]
+        h = self.enc(h, x_mask, g=g)  # [B,H/2, Tframe]
+        stats = self.post(h) * x_mask  # [B,H/2, Tframe]
 
         if not self.mean_only:
             m, logs = torch.split(stats, [self.half_channels] * 2, 1)
         else:
-            m = stats
-            logs = torch.zeros_like(m)
+            m = stats  # [B,H/2, Tframe]
+            logs = torch.zeros_like(m)  # [B,H/2, Tframe]
 
         if not reverse:
-            x1 = m + x1 * torch.exp(logs) * x_mask
-            x = torch.cat([x0, x1], 1)
-            logdet = torch.sum(logs, [1, 2])
+            x1 = m + x1 * torch.exp(logs) * x_mask  # [B,H/2, Tframe]
+            x = torch.cat([x0, x1], 1)  # [B,H, Tframe]
+            logdet = torch.sum(logs, [1, 2])  # [B]
             return x, logdet
         else:
             x1 = (x1 - m) * torch.exp(-logs) * x_mask

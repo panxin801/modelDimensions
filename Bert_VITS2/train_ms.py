@@ -492,7 +492,7 @@ def train_and_evaluate(
             )  # slice
 
             # Discriminator
-            y_d_hat_r, y_d_hat_g = net_d(y, y_hat.detach())
+            y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
             with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
                 loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
                     y_d_hat_r, y_d_hat_g)
