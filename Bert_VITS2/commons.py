@@ -3,13 +3,6 @@ import torch
 from torch.nn import functional as F
 
 
-def slice_segments(x, ids_str, segment_size=4):
-    gather_indices = ids_str.view(x.size(0), 1, 1).repeat(
-        1, x.size(1), 1
-    ) + torch.arange(segment_size, device=x.device)
-    return torch.gather(x, 2, gather_indices)
-
-
 def rand_slice_segments(x, x_lengths=None, segment_size=4):
     b, d, t = x.size()
     if x_lengths is None:
