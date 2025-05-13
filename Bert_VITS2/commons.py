@@ -55,6 +55,13 @@ def convert_pad_shape(pad_shape):
     return pad_shape
 
 
+def slice_segments(x, ids_str, segment_size=4):
+    gather_indices = ids_str.view(x.size(0), 1, 1).repeat(
+        1, x.size(1), 1
+    ) + torch.arange(segment_size, device=x.device)
+    return torch.gather(x, 2, gather_indices)
+
+
 def intersperse(lst, item):
     result = [item] * (len(lst) * 2 + 1)
     result[1::2] = lst
@@ -76,3 +83,21 @@ def fused_add_tanh_sigmoid_multiply(input_a, input_b, n_channels):
     s_act = torch.sigmoid(in_act[:, n_channels_int:, :])
     acts = t_act * s_act
     return acts
+
+
+def clip_grad_value_(parameters, clip_value, norm_type=2):
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    parameters = list(filter(lambda p: p.grad is not None, parameters))
+    norm_type = float(norm_type)
+    if clip_value is not None:
+        clip_value = float(clip_value)
+
+    total_norm = 0
+    for p in parameters:
+        param_norm = p.grad.data.norm(norm_type)
+        total_norm += param_norm.item() ** norm_type
+        if clip_value is not None:
+            p.grad.data.clamp_(min=-clip_value, max=clip_value)
+    total_norm = total_norm ** (1.0 / norm_type)
+    return total_norm

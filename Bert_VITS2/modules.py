@@ -254,12 +254,12 @@ class WN(torch.nn.Module):
         assert kernel_size % 2 == 1
         super(WN, self).__init__()
 
-        self.hidden_channels = hidden_channels
-        self.kernel_size = (kernel_size,)
-        self.dilation_rate = dilation_rate
-        self.n_layers = n_layers
-        self.gin_channels = gin_channels
-        self.p_dropout = p_dropout
+        self.hidden_channels = hidden_channels  # 192
+        self.kernel_size = (kernel_size,)  # 5
+        self.dilation_rate = dilation_rate  # 1
+        self.n_layers = n_layers  # 16
+        self.gin_channels = gin_channels  # 512
+        self.p_dropout = p_dropout  # 0
 
         self.in_layers = nn.ModuleList()
         self.res_skip_layers = nn.ModuleList()
@@ -352,27 +352,27 @@ class TransformerCouplingLayer(nn.Module):
         assert channels % 2 == 0, "channels should be divisible by 2"
         super().__init__()
 
-        self.channels = channels
-        self.hidden_channels = hidden_channels
-        self.kernel_size = kernel_size
-        self.n_layers = n_layers
-        self.half_channels = channels // 2
-        self.mean_only = mean_only
+        self.channels = channels  # 192
+        self.hidden_channels = hidden_channels  # 192
+        self.kernel_size = kernel_size  # 5
+        self.n_layers = n_layers  # 4
+        self.half_channels = channels // 2  # 192//2
+        self.mean_only = mean_only  # True
 
         self.pre = nn.Conv1d(self.half_channels, hidden_channels, 1)
         self.enc = (Encoder(
             hidden_channels,
-            filter_channels,
-            n_heads,
-            n_layers,
-            kernel_size,
-            p_dropout,
+            filter_channels,  # 768
+            n_heads,  # 2
+            n_layers,  # 4
+            kernel_size,  # 5
+            p_dropout,  # 0.1
             isflow=True,
-            gin_channels=gin_channels
-        ) if wn_sharing_parameter is None else wn_sharing_parameter)
+            gin_channels=gin_channels  # 512
+        ) if wn_sharing_parameter is None else wn_sharing_parameter)  # wn_sharing_parameter=None
 
-        self.post = nn.Conv2d(
-            hidden_channels, self.half_channels * (2 - mean_only), 1)
+        self.post = nn.Conv1d(
+            hidden_channels, self.half_channels * (2 - mean_only), 1)  # 2 - mean_only=1
         self.post.weight.data.zero_()
         self.post.bias.data.zero_()
 

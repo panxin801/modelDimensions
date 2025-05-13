@@ -40,22 +40,22 @@ class Encoder(nn.Module):
     ):
         super().__init__()
 
-        self.hidden_channels = hidden_channels
-        self.filter_channels = filter_channels
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.window_size = window_size
+        self.hidden_channels = hidden_channels  # 192
+        self.filter_channels = filter_channels  # 768
+        self.n_heads = n_heads  # 2
+        self.n_layers = n_layers  # 6
+        self.kernel_size = kernel_size  # 3
+        self.p_dropout = p_dropout  # 0.1
+        self.window_size = window_size  # 4
         # if isflow:
         #  cond_layer = torch.nn.Conv1d(256, 2*hidden_channels*n_layers, 1)
         #  self.cond_pre = torch.nn.Conv1d(hidden_channels, 2*hidden_channels, 1)
         #  self.cond_layer = weight_norm(cond_layer, name='weight')
         #  self.gin_channels = 256
-        self.cond_layer_idx = self.n_layers
+        self.cond_layer_idx = self.n_layers  # 6
 
         if "gin_channels" in kwargs:
-            self.gin_channels = kwargs["gin_channels"]
+            self.gin_channels = kwargs["gin_channels"]  # 512
             if self.gin_channels != 0:
                 self.spk_emb_linear = nn.Linear(
                     self.gin_channels, self.hidden_channels)

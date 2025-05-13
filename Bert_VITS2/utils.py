@@ -52,7 +52,7 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, skip_optimizer=False
             # For upgrading from the old version
             if "ja_bert_proj" in k:
                 v = torch.zeros_like(v)
-                logger.warn(
+                logger.warning(
                     f"Seems you are using the old version of the model, the {k} is automatically set to zero for backward compatibility"
                 )
             else:
@@ -205,3 +205,183 @@ class HParams:
 
     def __repr__(self):
         return self.__dict__.__repr__()
+
+
+def plot_spectrogram_to_numpy(spectrogram):
+    global MATPLOTLIB_FLAG
+    if not MATPLOTLIB_FLAG:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        MATPLOTLIB_FLAG = True
+        mpl_logger = logging.getLogger("matplotlib")
+        mpl_logger.setLevel(logging.WARNING)
+    import matplotlib.pylab as plt
+    import numpy as np
+
+    fig, ax = plt.subplots(figsize=(10, 2))
+    im = ax.imshow(spectrogram, aspect="auto",
+                   origin="lower", interpolation="none")
+    plt.colorbar(im, ax=ax)
+    plt.xlabel("Frames")
+    plt.ylabel("Channels")
+    plt.tight_layout()
+
+    fig.canvas.draw()
+    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
+    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    plt.close()
+    return data
+
+
+def plot_alignment_to_numpy(alignment, info=None):
+    global MATPLOTLIB_FLAG
+    if not MATPLOTLIB_FLAG:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        MATPLOTLIB_FLAG = True
+        mpl_logger = logging.getLogger("matplotlib")
+        mpl_logger.setLevel(logging.WARNING)
+    import matplotlib.pylab as plt
+    import numpy as np
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    im = ax.imshow(
+        alignment.transpose(), aspect="auto", origin="lower", interpolation="none"
+    )
+    fig.colorbar(im, ax=ax)
+    xlabel = "Decoder timestep"
+    if info is not None:
+        xlabel += "\n\n" + info
+    plt.xlabel(xlabel)
+    plt.ylabel("Encoder timestep")
+    plt.tight_layout()
+
+    fig.canvas.draw()
+    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
+    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    plt.close()
+    return data
+
+
+def summarize(
+    writer,
+    global_step,
+    scalars={},
+    histograms={},
+    images={},
+    audios={},
+    audio_sampling_rate=22050,
+):
+    for k, v in scalars.items():
+        writer.add_scalar(k, v, global_step)
+    for k, v in histograms.items():
+        writer.add_histogram(k, v, global_step)
+    for k, v in images.items():
+        writer.add_image(k, v, global_step, dataformats="HWC")
+    for k, v in audios.items():
+        writer.add_audio(k, v, global_step, audio_sampling_rate)
+
+
+def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path):
+    logger.info(
+        "Saving model and optimizer state at iteration {} to {}".format(
+            iteration, checkpoint_path
+        )
+    )
+    if hasattr(model, "module"):
+        state_dict = model.module.state_dict()
+    else:
+        state_dict = model.state_dict()
+    torch.save(
+        {
+            "model": state_dict,
+            "iteration": iteration,
+            "optimizer": optimizer.state_dict(),
+            "learning_rate": learning_rate,
+        },
+        checkpoint_path,
+    )
+
+
+def clean_checkpoints(path_to_models="logs/44k/", n_ckpts_to_keep=2, sort_by_time=True):
+    """Freeing up space by deleting saved ckpts
+
+    Arguments:
+    path_to_models    --  Path to the model directory
+    n_ckpts_to_keep   --  Number of ckpts to keep, excluding G_0.pth and D_0.pth
+    sort_by_time      --  True -> chronologically delete ckpts
+                          False -> lexicographically delete ckpts
+    """
+    import re
+
+    ckpts_files = [
+        f
+        for f in os.listdir(path_to_models)
+        if os.path.isfile(os.path.join(path_to_models, f))
+    ]
+
+    def name_key(_f):
+        return int(re.compile("._(\\d+)\\.pth").match(_f).group(1))
+
+    def time_key(_f):
+        return os.path.getmtime(os.path.join(path_to_models, _f))
+
+    sort_key = time_key if sort_by_time else name_key
+
+    def x_sorted(_x):
+        return sorted(
+            [f for f in ckpts_files if f.startswith(
+                _x) and not f.endswith("_0.pth")],
+            key=sort_key,
+        )
+
+    to_del = [
+        os.path.join(path_to_models, fn)
+        for fn in (
+            x_sorted("G")[:-n_ckpts_to_keep]
+            + x_sorted("D")[:-n_ckpts_to_keep]
+            + x_sorted("WD")[:-n_ckpts_to_keep]
+        )
+    ]
+
+    def del_info(fn):
+        return logger.info(f".. Free up space by deleting ckpt {fn}")
+
+    def del_routine(x):
+        return [os.remove(x), del_info(x)]
+
+    [del_routine(fn) for fn in to_del]
+
+
+def mix_model(
+    network1, network2, output_path, voice_ratio=(0.5, 0.5), tone_ratio=(0.5, 0.5)
+):
+    if hasattr(network1, "module"):
+        state_dict1 = network1.module.state_dict()
+        state_dict2 = network2.module.state_dict()
+    else:
+        state_dict1 = network1.state_dict()
+        state_dict2 = network2.state_dict()
+    for k in state_dict1.keys():
+        if k not in state_dict2.keys():
+            continue
+        if "enc_p" in k:
+            state_dict1[k] = (
+                state_dict1[k].clone() * tone_ratio[0]
+                + state_dict2[k].clone() * tone_ratio[1]
+            )
+        else:
+            state_dict1[k] = (
+                state_dict1[k].clone() * voice_ratio[0]
+                + state_dict2[k].clone() * voice_ratio[1]
+            )
+    for k in state_dict2.keys():
+        if k not in state_dict1.keys():
+            state_dict1[k] = state_dict2[k].clone()
+    torch.save(
+        {"model": state_dict1, "iteration": 0,
+            "optimizer": None, "learning_rate": 0},
+        output_path,
+    )

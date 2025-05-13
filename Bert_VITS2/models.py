@@ -14,11 +14,11 @@ class DurationDiscriminator(nn.Module):  # vits2
     def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, gin_channels=0):
         super().__init__()
 
-        self.in_channels = in_channels
-        self.filter_channels = filter_channels
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.gin_channels = gin_channels
+        self.in_channels = in_channels  # 192
+        self.filter_channels = filter_channels  # 192
+        self.kernel_size = kernel_size  # 3
+        self.p_dropout = p_dropout  # 0.1
+        self.gin_channels = gin_channels  # 512
 
         self.drop = nn.Dropout(p_dropout)
         self.conv_1 = nn.Conv1d(
@@ -106,12 +106,12 @@ class TransformerCouplingBlock(nn.Module):
     ):
         super().__init__()
 
-        self.channels = channels
-        self.hidden_channels = hidden_channels
-        self.kernel_size = kernel_size
-        self.n_layers = n_layers
-        self.n_flows = n_flows
-        self.gin_channels = gin_channels
+        self.channels = channels  # 192
+        self.hidden_channels = hidden_channels  # 192
+        self.kernel_size = kernel_size  # 5
+        self.n_layers = n_layers  # 4
+        self.n_flows = n_flows  # 4
+        self.gin_channels = gin_channels  # 512
 
         self.flows = nn.ModuleList()
 
@@ -125,7 +125,7 @@ class TransformerCouplingBlock(nn.Module):
             isflow=True,
             gin_channels=self.gin_channels,
         ) if share_parameter else None
-        )
+        )  # share_parameter=False
 
         for i in range(n_flows):
             self.flows.append(
@@ -168,14 +168,14 @@ class StochasticDurationPredictor(nn.Module):
         super().__init__()
 
         # it needs to be removed from future version.
-        filter_channels = in_channels
+        filter_channels = in_channels  # 192
 
-        self.in_channels = in_channels
-        self.filter_channels = filter_channels
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.n_flows = n_flows
-        self.gin_channels = gin_channels
+        self.in_channels = in_channels  # 192
+        self.filter_channels = filter_channels  # 192
+        self.kernel_size = kernel_size  # 3
+        self.p_dropout = p_dropout  # 0.5
+        self.n_flows = n_flows  # 4
+        self.gin_channels = gin_channels  # 512
 
         self.log_flow = modules.Log()
         self.flows = nn.ModuleList()
@@ -277,11 +277,11 @@ class DurationPredictor(nn.Module):
     ):
         super().__init__()
 
-        self.in_channels = in_channels
-        self.filter_channels = filter_channels
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.gin_channels = gin_channels
+        self.in_channels = in_channels  # 192
+        self.filter_channels = filter_channels  # 256
+        self.kernel_size = kernel_size  # 3
+        self.p_dropout = p_dropout  # 0.5
+        self.gin_channels = gin_channels  # 512
 
         self.drop = nn.Dropout(p_dropout)
         self.conv_1 = nn.Conv1d(
@@ -329,15 +329,15 @@ class TextEncoder(nn.Module):
     ):
         super().__init__()
 
-        self.n_vocab = n_vocab
-        self.out_channels = out_channels
-        self.hidden_channels = hidden_channels
-        self.filter_channels = filter_channels
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.gin_channels = gin_channels
+        self.n_vocab = n_vocab  # 512
+        self.out_channels = out_channels  # 192
+        self.hidden_channels = hidden_channels  # 192
+        self.filter_channels = filter_channels  # 768
+        self.n_heads = n_heads  # 2
+        self.n_layers = n_layers  # 6
+        self.kernel_size = kernel_size  # 3
+        self.p_dropout = p_dropout  # 0.1
+        self.gin_channels = gin_channels  # 512
         self.emb = nn.Embedding(len(symbols), hidden_channels)
         nn.init.normal_(self.emb.weight, 0.0, hidden_channels**-0.5)
 
@@ -443,13 +443,13 @@ class PosteriorEncoder(nn.Module):
     ):
         super().__init__()
 
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.hidden_channels = hidden_channels
-        self.kernel_size = kernel_size
-        self.dilation_rate = dilation_rate
-        self.n_layers = n_layers
-        self.gin_channels = gin_channels
+        self.in_channels = in_channels  # 1025
+        self.out_channels = out_channels  # 192
+        self.hidden_channels = hidden_channels  # 192
+        self.kernel_size = kernel_size  # 5
+        self.dilation_rate = dilation_rate  # 1
+        self.n_layers = n_layers  # 16
+        self.gin_channels = gin_channels  # 512
 
         self.pre = nn.Conv1d(in_channels, hidden_channels, 1)
         self.enc = modules.WN(
@@ -487,11 +487,11 @@ class Generator(torch.nn.Module):
     ):
         super(Generator, self).__init__()
 
-        self.num_kernels = len(resblock_kernel_sizes)
-        self.num_upsamples = len(upsample_rates)
+        self.num_kernels = len(resblock_kernel_sizes)  # 3, [3,7,11]
+        self.num_upsamples = len(upsample_rates)  # [8,8,4,2,2]
         self.conv_pre = nn.Conv1d(
             initial_channel, upsample_initial_channel, 7, 1, padding=3
-        )
+        )  # initial_channel=192, upsample_initial_channel=512
         resblock = modules.ResBlock1 if resblock == "1" else modules.ResBlock2
 
         self.ups = nn.ModuleList()
@@ -641,37 +641,39 @@ class SynthesizerTrn(nn.Module):
     ):
         super().__init__()
 
-        self.n_vocab = n_vocab
-        self.spec_channels = spec_channels
-        self.inter_channels = inter_channels
-        self.hidden_channels = hidden_channels
-        self.filter_channels = filter_channels
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.resblock = resblock
-        self.resblock_kernel_sizes = resblock_kernel_sizes
+        self.n_vocab = n_vocab  # 112
+        self.spec_channels = spec_channels  # 1025
+        self.inter_channels = inter_channels  # 192
+        self.hidden_channels = hidden_channels  # 192
+        self.filter_channels = filter_channels  # 768
+        self.n_heads = n_heads  # 2
+        self.n_layers = n_layers  # 6
+        self.kernel_size = kernel_size  # 3
+        self.p_dropout = p_dropout  # 0.1
+        self.resblock = resblock  # "1"
+        self.resblock_kernel_sizes = resblock_kernel_sizes  # [3,7,11]
+        # [[1,3,5],[1,3,5],[1,3,5],]
         self.resblock_dilation_sizes = resblock_dilation_sizes
-        self.upsample_rates = upsample_rates
-        self.upsample_initial_channel = upsample_initial_channel
-        self.upsample_kernel_sizes = upsample_kernel_sizes
-        self.segment_size = segment_size
-        self.n_speakers = n_speakers
-        self.gin_channels = gin_channels
-        self.n_layers_trans_flow = n_layers_trans_flow
+        self.upsample_rates = upsample_rates  # [8,8,2,2,2]
+        self.upsample_initial_channel = upsample_initial_channel  # 512
+        self.upsample_kernel_sizes = upsample_kernel_sizes  # [16,16,8,2,2,]
+        self.segment_size = segment_size  # 32
+        self.n_speakers = n_speakers  # 35
+        self.gin_channels = gin_channels  # 512
+        self.n_layers_trans_flow = n_layers_trans_flow  # 4
         self.use_spk_conditioned_encoder = kwargs.get(
             "use_spk_conditioned_encoder", True
-        )
-        self.use_sdp = use_sdp
-        self.use_noise_scaled_mas = kwargs.get("use_noise_scaled_mas", False)
+        )  # True
+        self.use_sdp = use_sdp  # True
+        self.use_noise_scaled_mas = kwargs.get(
+            "use_noise_scaled_mas", False)  # True
         self.mas_noise_scale_initial = kwargs.get(
-            "mas_noise_scale_initial", 0.01)
-        self.noise_scale_delta = kwargs.get("noise_scale_delta", 2e-6)
-        self.current_mas_noise_scale = self.mas_noise_scale_initial
+            "mas_noise_scale_initial", 0.01)  # 0.01
+        self.noise_scale_delta = kwargs.get("noise_scale_delta", 2e-6)  # 2e-6
+        self.current_mas_noise_scale = self.mas_noise_scale_initial  # 0.01
 
         if self.use_spk_conditioned_encoder and gin_channels > 0:
-            self.enc_gin_channels = gin_channels
+            self.enc_gin_channels = gin_channels  # 512
 
         self.enc_p = TextEncoder(
             n_vocab,
@@ -705,7 +707,7 @@ class SynthesizerTrn(nn.Module):
         )
 
         if use_transformer_flow:
-            self.flows = TransformerCouplingBlock(
+            self.flow = TransformerCouplingBlock(
                 inter_channels,
                 hidden_channels,
                 filter_channels,
@@ -814,7 +816,7 @@ class SynthesizerTrn(nn.Module):
         logw = self.dp(x, x_mask, g=g)
         logw_sdp = self.sdp(x, x_mask, g=g, reverse=True, noise_scale=1.0)
         l_length_dp = torch.sum(
-            (logw - logw_)**2[1, 2]) / torch.sum(x_mask)   # for averaging
+            (logw - logw_)**2, [1, 2]) / torch.sum(x_mask)   # for averaging
         l_length_sdp += torch.sum((logw_sdp - logw_)
                                   ** 2, [1, 2]) / torch.sum(x_mask)
 
@@ -1042,7 +1044,7 @@ class WavLMDiscriminator(nn.Module):
 
         norm_f = nn.utils.weight_norm if use_spectral_norm == False else nn.utils.spectral_norm
         self.pre = norm_f(nn.Conv1d(slm_hidden * slm_layers,
-                          initial_channel, 1, 1, padding=0))
+                          initial_channel, 1, 1, padding=0))  # 768*13,64
 
         self.convs = nn.ModuleList(
             [
