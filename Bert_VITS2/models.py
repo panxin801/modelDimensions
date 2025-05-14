@@ -876,7 +876,7 @@ class SynthesizerTrn(nn.Module):
         else:
             g = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
 
-        # prior
+        # prior 输入都是文本信息和音色
         x, m_p, logs_p, x_mask = self.enc_p(
             x, x_lengths, tone, language, bert, ja_bert, en_bert, g=g)
         # x: [B, h=192, Ttext], 各种文本信息, 增加了speaker embedding作为condition
@@ -884,7 +884,7 @@ class SynthesizerTrn(nn.Module):
         # logs_p: [B, h=192, Ttext], prior log variance
         # x_mask: [B, 1, Ttext], 文本mask
 
-        # posterior
+        # posterior 输入都是音频信息和音色
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
         # z: [B,192, Tframe], 后验采样
         # m_q: [B,192, Tframe], prior mean
@@ -924,13 +924,13 @@ class SynthesizerTrn(nn.Module):
 
         w = attn.sum(2)  # [B,1,Ttext]
 
-        l_length_sdp = self.sdp(x, x_mask, w, g=g)
+        l_length_sdp = self.sdp(x, x_mask, w, g=g)  # 有W
         l_length_sdp = l_length_sdp / torch.sum(x_mask)  # [B]
 
         logw_ = torch.log(w + 1e-6) * x_mask
         logw = self.dp(x, x_mask, g=g)  # [B,1,Ttext]
         logw_sdp = self.sdp(x, x_mask, g=g, reverse=True,
-                            noise_scale=1.0)  # [B,1,Ttext]
+                            noise_scale=1.0)  # [B,1,Ttext]， 无W
         l_length_dp = torch.sum(
             (logw - logw_)**2, [1, 2]) / torch.sum(x_mask)   # for averaging
         l_length_sdp += torch.sum((logw_sdp - logw_)
