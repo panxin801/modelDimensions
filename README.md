@@ -18,5 +18,5 @@ Gpt-Sovits: Few-shot Voice conversion and TTS system
 - whisper-vits-svc: https://github.com/PlayVoice/whisper-vits-svc/tree/bigvgan-mix-v2
 - bert_vits2: https://github.com/fishaudio/Bert-VITS2
     - vits2: https://github.com/p0p4k/vits2_pytorch/tree/main
-- gpt_sovits: https://github.com/RVC-Boss/GPT-SoVITS (Not started yet)
+- gpt_sovits: https://github.com/RVC-Boss/GPT-SoVITS
 
