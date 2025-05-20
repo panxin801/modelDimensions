@@ -10,6 +10,7 @@ Gpt-Sovits: Few-shot Voice conversion and TTS system
 
 ## Details
 - vits_chinese: https://github.com/wac81/vits_chinese
+- vits_chinese with block streaming：https://github.com/PlayVoice/vits_chinese/tree/af96d5cf0f553c7e6cf68c9e888f0de0c7e933bd
 - HiFi-GAN: https://github.com/jik876/hifi-gan
 - soft_vc: https://github.com/bshall/soft-vc
     - soft_vc_hubert: https://github.com/bshall/hubert
