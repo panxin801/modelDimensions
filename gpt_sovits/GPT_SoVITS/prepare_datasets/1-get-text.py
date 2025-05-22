@@ -68,6 +68,7 @@ def get_bert_feature(text, word2ph):
         repeatFeature = res[i].repeat(word2ph[i], 1)
         phoneLevelFeature.append(repeatFeature)
 
+    # [len(phones), 1024] 文本提取的bert特征。
     phoneLevelFeature = torch.cat(phoneLevelFeature, 0)
     return phoneLevelFeature.T
 
@@ -79,7 +80,7 @@ def process(data, res):
             name = os.path.basename(name)
             print(name)
             phones, word2ph, normText = clean_text(
-                text.replace("%", "-").replace("￥", ","), lan, version)
+                text.replace("%", "-").replace("￥", ","), lan, version)  # normText是正则化后文本，word2ph长度是字数，表示每个字在phones中占几个位置，sum(word2ph)=len(phones)
             pathBert = f"{bertDir}/{name}.pth"
             if not os.path.exists(pathBert) and lan == "zh":
                 bertFeature = get_bert_feature(normText, word2ph)
