@@ -20,15 +20,20 @@ def load_audio(file, sr):
             raise RuntimeError(
                 "You input a wrong audio path that does not exists, please fix it!")
 
+        # out, _ = (ffmpeg.input(file, threads=0)
+        #           .output("-", format="f32le", acodec="pcm_s32le", ac=1, ar=sr)
+        #           .run(cmd=["ffmpeg", "-nostdin"], capture_stdout=True, capture_stderr=True)
+        #           )
         out, _ = (ffmpeg.input(file, threads=0)
-                  .output("-", format="f32le", acodec="pcm_s32le", ac=1, ar=sr)
+                  .output("-", format="s16le", acodec="pcm_s16le", ac=1, ar=sr)
                   .run(cmd=["ffmpeg", "-nostdin"], capture_stdout=True, capture_stderr=True)
                   )
     except Exception:
         traceback.print_exc()
         raise RuntimeError(i18n("音频加载失败"))
 
-    return np.frombuffer(out, np.float32).flatten()
+    # return np.frombuffer(out, np.float32).flatten()
+    return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
 
 def clean_path(path_str: str):
@@ -95,7 +100,7 @@ def check_details(path_list=None, is_train=False, is_dataset_processing=False):
             line = f.readline().strip("\n").split("\n")
         wav_name, _, __, ___ = line[0].split("|")
         wav_name = clean_path(wav_name)
-        if audio_path != "" and audio_path != None:
+        if audio_path != "" and (not audio_path is None):
             wav_name = os.sep.join(wav_name.split(os.sep)[1:])
             wav_path = os.path.join(audio_path, wav_name)
         else:
