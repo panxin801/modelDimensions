@@ -186,7 +186,7 @@ def main(args):
         gpuNumbers = "0-0"  # GPU卡号以-分割，每个卡号一个进程
         bertPretrainDir = "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large"
 
-        run1a(args.dataLst, args.expname, gpuNumbers, bertPretrainDir)
+        # run1a(args.dataLst, args.expname, gpuNumbers, bertPretrainDir)
 
     if args.start <= 1 and args.end >= 1:
         print("Stage 1: 语音自监督特征提取")
