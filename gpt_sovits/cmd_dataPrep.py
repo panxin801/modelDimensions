@@ -128,7 +128,49 @@ def run1a(dataLst, expname, gpuNumbers, bertPretrainDir):
         with open(pathText, "wt", encoding="utf8") as fw:
             fw.write("\n".join(opt) + "\n")
 
-        print(f"Finish 1a:{pathText}")
+    print(f"Finish 1a:{pathText}")
+
+
+def run1b(dataLst, expname, gpuNumbers, hubertPretrainDir):
+    ps1b = []
+    dataLst = dataPrep_utils.clean_path(dataLst)
+    wavDir = dataPrep_utils.clean_path(
+        os.path.abspath(os.path.dirname(dataLst)))
+    if dataPrep_utils.check_for_existance([dataLst, wavDir], is_dataset_processing=True):
+        dataPrep_utils.check_details(
+            [dataLst, wavDir], is_dataset_processing=True)
+
+    if ps1b == []:
+        opt_dir = os.sep.join([exp_root, expname])
+        config = {
+            "inp_text": dataLst,
+            "inp_wav_dir": wavDir,
+            "exp_name": expname,
+            "opt_dir": opt_dir,
+            "cnhubert_base_dir": hubertPretrainDir,
+        }
+        gpuNames = gpuNumbers.split("-")
+        allparts = len(gpuNames)
+        for i in range(allparts):
+            config.update(
+                {
+                    "i_part": str(i),
+                    "all_parts": str(allparts),
+                    "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpuNames[i]),
+                    "is_half": str(is_half),
+                }
+            )
+            print(config)
+            os.environ.update(config)
+            cmd = f"{python_exec} GPT_SoVITS/prepare_datasets/2-get-hubert-wav32k.py"
+            print(cmd)
+            p = Popen(cmd, shell=True)
+            ps1b.append(p)
+
+        for p in ps1b:
+            p.wait()
+
+    print("Finish 1b")
 
 
 def main(args):
@@ -148,6 +190,11 @@ def main(args):
 
     if args.start <= 1 and args.end >= 1:
         print("Stage 1: 语音自监督特征提取")
+
+        gpuNumbers = "0-0"
+        hubertPretrainDir = "GPT_SoVITS/pretrained_models/chinese-hubert-base"
+
+        run1b(args.dataLst, args.expname, gpuNumbers, hubertPretrainDir)
 
     if args.start <= 2 and args.end >= 2:
         print("Stage 2: 语义Token提取")
