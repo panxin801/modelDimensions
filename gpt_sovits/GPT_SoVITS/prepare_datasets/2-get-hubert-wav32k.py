@@ -63,7 +63,7 @@ def name2go(wav_name, wav_path):
         tensor_wav16 = tensor_wav16.to(device)
 
     ssl = model.model(tensor_wav16.unsqueeze(0))["last_hidden_state"].transpose(
-        1, 2).cpu()  # torch.Size([1, 768, 215])
+        1, 2).cpu()  # torch.Size([1, 768, 215]), hubert model
     if np.isnan(ssl.detach().numpy()).sum() != 0:
         nan_fails.append((wav_name, wav_path))
         print(f"nan filtered:{wav_name}")
