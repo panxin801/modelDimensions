@@ -68,6 +68,19 @@ if torch.cuda.is_available() or ngpu != 0:
 gpus = "-".join([i[0] for i in gpu_infos])
 default_gpu_numbers = str(sorted(list(set_gpu_numbers))[0])
 
+pretrained_sovits_name = [
+    "GPT_SoVITS/pretrained_models/s2G488k.pth",
+    "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth",
+    "GPT_SoVITS/pretrained_models/s2Gv3.pth",
+    "GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth",
+]
+pretrained_gpt_name = [
+    "GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt",
+    "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt",
+    "GPT_SoVITS/pretrained_models/s1v3.ckpt",
+    "GPT_SoVITS/pretrained_models/s1v3.ckpt",
+]
+
 
 def fix_gpu_number(input):  # 将越界的number强制改到界内
     try:
@@ -173,6 +186,55 @@ def run1b(dataLst, expname, gpuNumbers, hubertPretrainDir):
     print("Finish 1b")
 
 
+def run1c(dataLst, expname, gpuNumbers, pretrainedS2GPath):
+    ps1c = []
+    dataLst = dataPrep_utils.clean_path(dataLst)
+    if dataPrep_utils.check_for_existance([dataLst, ""], is_dataset_processing=True):
+        dataPrep_utils.check_details([dataLst, ""], is_dataset_processing=True)
+
+    if ps1c == []:
+        opt_dir = os.sep.join([exp_root, expname])
+        config = {
+            "inp_text": dataLst,
+            "exp_name": expname,
+            "opt_dir": opt_dir,
+            "pretrained_s2G": pretrainedS2GPath,
+            "s2config_path": "GPT_SoVITS/configs/s2.json",
+            "is_half": str(is_half),
+        }
+        gpuNames = gpuNumbers.split("-")
+        allparts = len(gpuNames)
+        for i in range(allparts):
+            config.update(
+                {
+                    "i_part": str(i),
+                    "all_parts": str(allparts),
+                    "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpuNames[i]),
+                }
+            )
+            os.environ.update(config)
+            cmd = f"{python_exec} GPT_SoVITS/prepare_datasets/3-get-semantic.py"
+            print(cmd)
+            p = Popen(cmd, shell=True)
+            ps1c.append(p)
+
+        for p in ps1c:
+            p.wait()
+
+        opt = ["item_name\tsemantic_audio"]
+        pathSemantic = f"{opt_dir}/6-name2semantic.tsv"
+        for i in range(allparts):
+            semanticPath = f"{opt_dir}/6-name2semantic-{i}.tsv"
+            with open(semanticPath, "rt", encoding="utf8") as fr:
+                opt += fr.read().strip("\n").split("\n")
+            os.remove(semanticPath)
+
+        with open(pathSemantic, "wt", encoding="utf8") as fw:
+            fw.write("\n".join(opt) + "\n")
+
+    print(f"Finish 1c {pathSemantic}")
+
+
 def main(args):
     """ Stage document.
     0 -> 文本分词与特征提取
@@ -194,10 +256,15 @@ def main(args):
         gpuNumbers = "0-0"
         hubertPretrainDir = "GPT_SoVITS/pretrained_models/chinese-hubert-base"
 
-        run1b(args.dataLst, args.expname, gpuNumbers, hubertPretrainDir)
+        # run1b(args.dataLst, args.expname, gpuNumbers, hubertPretrainDir)
 
     if args.start <= 2 and args.end >= 2:
         print("Stage 2: 语义Token提取")
+
+        gpuNumbers = "0-0"
+        pretrainedS2GPath = pretrained_sovits_name[int(args.version[-1]) - 1]
+
+        run1c(args.dataLst, args.expname, gpuNumbers, pretrainedS2GPath)
 
     print("All ok")
 
@@ -216,5 +283,14 @@ if __name__ == "__main__":
     parser.add_argument("--expname", type=str,
                         default="TestA1", help="name of experiment")
     args = parser.parse_args()
+
+    pretrained_model_list = (
+        pretrained_sovits_name[int(args.version[-1]) - 1],
+        pretrained_sovits_name[int(args.version[-1]) -
+                               1].replace("s2G", "s2D"),
+        pretrained_gpt_name[int(args.version[-1]) - 1],
+        "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
+        "GPT_SoVITS/pretrained_models/chinese-hubert-base",
+    )
 
     main(args)
