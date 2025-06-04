@@ -43,9 +43,9 @@ def name2go(wav_name, lines):
 
 
 if __name__ == "__main__":
-    config = {'inp_text': 'data\\train.list', 'exp_name': 'TestA1', 'opt_dir': 'logs\\TestA1', 'pretrained_s2G': 'GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth',
-              's2config_path': 'GPT_SoVITS/configs/s2.json', 'is_half': 'False', 'i_part': '0', 'all_parts': '2', '_CUDA_VISIBLE_DEVICES': '0'}
-    os.environ.update(config)
+    # config = {'inp_text': 'data\\train.list', 'exp_name': 'TestA1', 'opt_dir': 'logs\\TestA1', 'pretrained_s2G': 'GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth',
+    #           's2config_path': 'GPT_SoVITS/configs/s2.json', 'is_half': 'False', 'i_part': '0', 'all_parts': '2', '_CUDA_VISIBLE_DEVICES': '0'}
+    # os.environ.update(config)
 
     inp_text = os.environ.get("inp_text")
     exp_name = os.environ.get("exp_name")
@@ -116,7 +116,8 @@ if __name__ == "__main__":
             try:
                 wav_name, spk_name, language, text = line.split("|")
                 wav_name = dataPrep_utils.clean_path(wav_name)
-                wav_name = os.path.basename(wav_name)
+                # wav_name = os.path.basename(wav_name)
+                wav_name = os.path.sep.join(wav_name.split(os.path.sep)[1:])
                 name2go(wav_name, lines1)
             except:
                 print(line, traceback.format_exc())
