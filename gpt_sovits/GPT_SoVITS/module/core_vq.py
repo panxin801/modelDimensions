@@ -31,12 +31,11 @@
 
 """Core vector quantization implementation."""
 import typing as tp
-
-from einops import rearrange, repeat
 import torch
-from torch import nn
+import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
+from einops import rearrange, repeat
 
 
 def default(val: tp.Any, d: tp.Any) -> tp.Any:
@@ -125,14 +124,21 @@ class EuclideanCodebook(nn.Module):
         init_fn: tp.Union[tp.Callable[..., torch.Tensor], tp.Any] = (
             uniform_init if not kmeans_init else torch.zeros
         )
-        embed = init_fn(codebook_size, dim)
+        embed = init_fn(codebook_size, dim)  # [1024, 768]
 
-        self.codebook_size = codebook_size
+        self.codebook_size = codebook_size  # 1024
 
         self.kmeans_iters = kmeans_iters
         self.epsilon = epsilon
-        self.threshold_ema_dead_code = threshold_ema_dead_code
+        self.threshold_ema_dead_code = threshold_ema_dead_code  # 2
 
+        # 这个方法用于注册一个缓冲区（buffer）。缓冲区不会被视为模型的参数（即不会被优化器更新），
+        # 但它们会保存在模型的状态字典（state dictionary）中，并且会在保存和加载模型时被包含在内。
+        # 缓冲区会在模型保存和加载时被包含，但不会被优化器更新。
+
+        # self.embed = embed: 这直接将 embed 赋值给 self.embed，但这并不会将 embed 注册为缓冲区。
+        # 相反，embed 会被视为模型的参数，并会被优化器更新。
+        # 参数会在模型保存和加载时被包含，并且会被优化器更新。
         self.register_buffer("inited", torch.Tensor([not kmeans_init]))
         self.register_buffer("cluster_size", torch.zeros(codebook_size))
         self.register_buffer("embed", embed)
@@ -265,6 +271,7 @@ class VectorQuantization(nn.Module):
         commitment_weight: float = 1.0,
     ):
         super().__init__()
+        # codebook_dim=None, dim=768
         _codebook_dim: int = default(codebook_dim, dim)
 
         requires_projection = _codebook_dim != dim
@@ -277,19 +284,19 @@ class VectorQuantization(nn.Module):
                       dim) if requires_projection else nn.Identity()
         )
 
-        self.epsilon = epsilon
-        self.commitment_weight = commitment_weight
+        self.epsilon = epsilon  # 1e-5
+        self.commitment_weight = commitment_weight  # 1.0
 
         self._codebook = EuclideanCodebook(
-            dim=_codebook_dim,
-            codebook_size=codebook_size,
-            kmeans_init=kmeans_init,
-            kmeans_iters=kmeans_iters,
-            decay=decay,
-            epsilon=epsilon,
-            threshold_ema_dead_code=threshold_ema_dead_code,
+            dim=_codebook_dim,  # 768
+            codebook_size=codebook_size,  # 1024
+            kmeans_init=kmeans_init,  # True
+            kmeans_iters=kmeans_iters,  # 50
+            decay=decay,  # 0.9
+            epsilon=epsilon,  # 1e-5
+            threshold_ema_dead_code=threshold_ema_dead_code,  # 2
         )
-        self.codebook_size = codebook_size
+        self.codebook_size = codebook_size  # 1024
 
     @property
     def codebook(self):
@@ -336,6 +343,7 @@ class ResidualVectorQuantization(nn.Module):
 
     def __init__(self, *, num_quantizers, **kwargs):
         super().__init__()
+        # num_quantizers=1
         self.layers = nn.ModuleList(
             [VectorQuantization(**kwargs) for _ in range(num_quantizers)]
         )
@@ -343,6 +351,14 @@ class ResidualVectorQuantization(nn.Module):
     def forward(
         self, x, n_q: tp.Optional[int] = None, layers: tp.Optional[list] = None
     ):
+        """ 
+        x: [B,D,F]
+        Return 
+        quantized_out: [B,D,F]
+        out_indices: [B,1,F] 
+        out_losses: [B,1]
+        out_quantized
+        """
         quantized_out = 0.0
         residual = x
 
@@ -354,6 +370,9 @@ class ResidualVectorQuantization(nn.Module):
 
         for i, layer in enumerate(self.layers[:n_q]):
             quantized, indices, loss = layer(residual)
+            # quantized=[B,D,F]
+            # indices=[B,F]
+            # loss=[1]
             residual = residual - quantized
             quantized_out = quantized_out + quantized
 

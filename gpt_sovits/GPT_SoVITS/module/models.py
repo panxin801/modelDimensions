@@ -31,15 +31,15 @@ class TextEncoder(nn.Module):
     ):
         super().__init__()
 
-        self.out_channels = out_channels
-        self.hidden_channels = hidden_channels
-        self.filter_channels = filter_channels
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.latent_channels = latent_channels
-        self.version = version
+        self.out_channels = out_channels  # 192
+        self.hidden_channels = hidden_channels  # 192
+        self.filter_channels = filter_channels  # 768
+        self.n_heads = n_heads  # 2
+        self.n_layers = n_layers  # 6
+        self.kernel_size = kernel_size  # 3
+        self.p_dropout = p_dropout  # 0.1
+        self.latent_channels = latent_channels  # 192
+        self.version = version  # "v2"
 
         self.ssl_proj = nn.Conv1d(768, hidden_channels, 1)
 
@@ -126,13 +126,13 @@ class Encoder(nn.Module):
         self, in_channels, out_channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0
     ):
         super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.hidden_channels = hidden_channels
-        self.kernel_size = kernel_size
-        self.dilation_rate = dilation_rate
-        self.n_layers = n_layers
-        self.gin_channels = gin_channels
+        self.in_channels = in_channels  # 512
+        self.out_channels = out_channels  # 512
+        self.hidden_channels = hidden_channels  # 512
+        self.kernel_size = kernel_size  # 5
+        self.dilation_rate = dilation_rate  # 1
+        self.n_layers = n_layers  # 8
+        self.gin_channels = gin_channels  # 512
 
         self.pre = nn.Conv1d(in_channels, hidden_channels, 1)
         self.enc = modules.WN(hidden_channels, kernel_size,
@@ -156,7 +156,7 @@ class CFM(nn.Module):
         self.estimator = dit
 
         self.sigma_min = 1e-6
-        self.in_channels = in_channels
+        self.in_channels = in_channels  # 100
         self.criterion = nn.MSELoss()
 
     @torch.inference_mode()
@@ -236,7 +236,7 @@ class CFM(nn.Module):
             xt, prompt, x_lens, t, dt, mu, use_grad_ckpt).transpose(2, 1)
         loss = 0
         for i in range(b):
-            loss += self.criterion(vt_pred[i, :, prompt_lens[i]: x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
+            loss += self.criterion(vt_pred[i, :, prompt_lens[i]                                   : x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
         loss /= b
 
         return loss
@@ -279,27 +279,28 @@ class SynthesizerTrnV3(nn.Module):
     ):
         super().__init__()
 
-        self.spec_channels = spec_channels
-        self.inter_channels = inter_channels
-        self.hidden_channels = hidden_channels
-        self.filter_channels = filter_channels
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.resblock = resblock
-        self.resblock_kernel_sizes = resblock_kernel_sizes
+        self.spec_channels = spec_channels  # 1025
+        self.inter_channels = inter_channels  # 192
+        self.hidden_channels = hidden_channels  # 192
+        self.filter_channels = filter_channels  # 768
+        self.n_heads = n_heads  # 2
+        self.n_layers = n_layers  # 6
+        self.kernel_size = kernel_size  # 3
+        self.p_dropout = p_dropout  # 0.1
+        self.resblock = resblock  # "1"
+        self.resblock_kernel_sizes = resblock_kernel_sizes  # [3,7,11]
+        # [[1,3,5],[1,3,5],[1,3,5]]
         self.resblock_dilation_sizes = resblock_dilation_sizes
-        self.upsample_rates = upsample_rates
-        self.upsample_initial_channel = upsample_initial_channel
-        self.upsample_kernel_sizes = upsample_kernel_sizes
-        self.segment_size = segment_size
-        self.n_speakers = n_speakers
-        self.gin_channels = gin_channels
-        self.version = version
+        self.upsample_rates = upsample_rates  # [10,8,8,2,2]
+        self.upsample_initial_channel = upsample_initial_channel  # 512
+        self.upsample_kernel_sizes = upsample_kernel_sizes  # [16,16,8,2,2]
+        self.segment_size = segment_size  # 32
+        self.n_speakers = n_speakers  # 300
+        self.gin_channels = gin_channels  # 512
+        self.version = version  # "v3"
 
         self.model_dim = 512
-        self.use_sdp = use_sdp
+        self.use_sdp = use_sdp  # True
         self.enc_p = TextEncoder(inter_channels, hidden_channels,
                                  filter_channels, n_heads, n_layers, kernel_size, p_dropout)
         # self.ref_enc = modules.MelStyleEncoder(spec_channels, style_vector_dim=gin_channels)###Rollback
@@ -312,7 +313,7 @@ class SynthesizerTrnV3(nn.Module):
         # self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
 
         ssl_dim = 768
-        assert semantic_frame_rate in ["25hz", "50hz"]
+        assert semantic_frame_rate in ["25hz", "50hz"]  # "25hz"
         self.semantic_frame_rate = semantic_frame_rate
         if semantic_frame_rate == "25hz":
             self.ssl_proj = nn.Conv1d(ssl_dim, ssl_dim, 2, stride=2)
@@ -321,7 +322,7 @@ class SynthesizerTrnV3(nn.Module):
 
         self.quantizer = quantize.ResidualVectorQuantizer(
             dimension=ssl_dim, n_q=1, bins=1024)
-        self.freeze_quantizer = freeze_quantizer
+        self.freeze_quantizer = freeze_quantizer  # True
         inter_channels2 = 512
         self.bridge = nn.Sequential(
             nn.Conv1d(inter_channels, inter_channels2, 1, stride=1),
@@ -409,6 +410,12 @@ class SynthesizerTrnV3(nn.Module):
         return fea, ge
 
     def extract_latent(self, x):
-        ssl = self.ssl_proj(x)
-        quantized, codes, commit_loss, quantized_list = self.quantizer(ssl)
+        """
+        x: [B,D=768,F], cnhubert extract from 32k wavs
+        return: 
+        codes.transpose=[D,B,F/2]
+        """
+        ssl = self.ssl_proj(x)  # [b,D,F/2]
+        quantized, codes, commit_loss, quantized_list = self.quantizer(
+            ssl)  # codes 是残差后的ssl index, quantized 是残差后的ssl rvq 码本值
         return codes.transpose(0, 1)

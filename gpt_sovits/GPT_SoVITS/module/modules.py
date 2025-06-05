@@ -138,14 +138,14 @@ class WN(torch.nn.Module):
         gin_channels=0,
         p_dropout=0,
     ):
-        super(WN, self).__init__()
+        super().__init__()
         assert kernel_size % 2 == 1
-        self.hidden_channels = hidden_channels
-        self.kernel_size = (kernel_size,)
-        self.dilation_rate = dilation_rate
-        self.n_layers = n_layers
-        self.gin_channels = gin_channels
-        self.p_dropout = p_dropout
+        self.hidden_channels = hidden_channels  # 512
+        self.kernel_size = (kernel_size,)  # 5
+        self.dilation_rate = dilation_rate  # 1
+        self.n_layers = n_layers  # 8
+        self.gin_channels = gin_channels  # 512
+        self.p_dropout = p_dropout  # 0
 
         self.in_layers = torch.nn.ModuleList()
         self.res_skip_layers = torch.nn.ModuleList()
@@ -699,13 +699,13 @@ class MelStyleEncoder(nn.Module):
         style_head=2,
         dropout=0.1,
     ):
-        super(MelStyleEncoder, self).__init__()
-        self.in_dim = n_mel_channels
-        self.hidden_dim = style_hidden
-        self.out_dim = style_vector_dim
-        self.kernel_size = style_kernel_size
-        self.n_head = style_head
-        self.dropout = dropout
+        super().__init__()
+        self.in_dim = n_mel_channels  # 704
+        self.hidden_dim = style_hidden  # 128
+        self.out_dim = style_vector_dim  # 512
+        self.kernel_size = style_kernel_size  # 5
+        self.n_head = style_head  # 2
+        self.dropout = dropout  # 0.1
 
         self.spectral = nn.Sequential(
             LinearNorm(self.in_dim, self.hidden_dim),

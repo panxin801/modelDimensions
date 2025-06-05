@@ -106,20 +106,22 @@ class DiT(nn.Module):
     ):
         super().__init__()
 
-        self.time_embed = TimestepEmbedding(dim)
+        self.time_embed = TimestepEmbedding(dim)  # 1024
         self.d_embed = TimestepEmbedding(dim)
-        if text_dim is None:
+        if text_dim is None:  # 512
             text_dim = mel_dim
-        self.text_embed = TextEmbedding(text_dim, conv_layers=conv_layers)
-        self.input_embed = InputEmbedding(mel_dim, text_dim, dim)
+        self.text_embed = TextEmbedding(
+            text_dim, conv_layers=conv_layers)  # conv_layers=4
+        self.input_embed = InputEmbedding(
+            mel_dim, text_dim, dim)  # mel_dim=100
 
-        self.rotary_embed = RotaryEmbedding(dim_head)
+        self.rotary_embed = RotaryEmbedding(dim_head)  # 64
 
         self.dim = dim
-        self.depth = depth
+        self.depth = depth  # 22
 
         self.transformer_blocks = nn.ModuleList([DiTBlock(
-            dim=dim, heads=heads, dim_head=dim_head, ff_mult=ff_mult, dropout=dropout) for _ in range(depth)]
+            dim=dim, heads=heads, dim_head=dim_head, ff_mult=ff_mult, dropout=dropout) for _ in range(depth)]  # heads=16, ff_mult=2
         )
         self.long_skip_connection = nn.Linear(
             dim * 2, dim, bias=False) if long_skip_connection else None

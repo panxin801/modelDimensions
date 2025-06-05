@@ -17,10 +17,12 @@ class MRTE(nn.Module):
         super().__init__()
 
         self.cross_attention = MultiHeadAttention(
-            hidden_size, hidden_size, n_heads)
+            hidden_size, hidden_size, n_heads)  # hidden_size=512, n_heads=4
+        # content_enc_channels=192
         self.c_pre = nn.Conv1d(content_enc_channels, hidden_size, 1)
         self.text_pre = nn.Conv1d(content_enc_channels, hidden_size, 1)
-        self.c_post = nn.Conv1d(hidden_size, out_channels, 1)
+        self.c_post = nn.Conv1d(
+            hidden_size, out_channels, 1)  # out_channels=192
 
     def forward(self, ssl_enc, ssl_mask, text, text_mask, ge, test=None):
         if ge is None:

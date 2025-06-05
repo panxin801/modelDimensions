@@ -49,13 +49,13 @@ class ResidualVectorQuantizer(nn.Module):
         threshold_ema_dead_code: int = 2,
     ):
         super().__init__()
-        self.n_q = n_q
-        self.dimension = dimension
-        self.bins = bins
-        self.decay = decay
-        self.kmeans_init = kmeans_init
-        self.kmeans_iters = kmeans_iters
-        self.threshold_ema_dead_code = threshold_ema_dead_code
+        self.n_q = n_q  # 1
+        self.dimension = dimension  # 768
+        self.bins = bins  # 1024
+        self.decay = decay  # 0.99
+        self.kmeans_init = kmeans_init  # True
+        self.kmeans_iters = kmeans_iters  # 50
+        self.threshold_ema_dead_code = threshold_ema_dead_code  # 2
         self.vq = ResidualVectorQuantization(
             dim=self.dimension,
             codebook_size=self.bins,
@@ -74,13 +74,17 @@ class ResidualVectorQuantizer(nn.Module):
     ) -> QuantizedResult:
         """Residual vector quantization on the given input tensor.
         Args:
-            x (torch.Tensor): Input tensor.
+            x (torch.Tensor): Input tensor. [B,D,F]
             n_q (int): Number of quantizer used to quantize. Default: All quantizers.
             layers (list): Layer that need to return quantized. Defalt: None.
         Returns:
             QuantizedResult:
                 The quantized (or approximately quantized) representation with
                 the associated numbert quantizers and layer quantized required to return.
+            quantized: [B,D,F],
+            codes: [B,1,F],
+            torch.mean(commit_loss)=[B],
+            quantized_list
         """
         n_q = n_q if n_q else self.n_q
         if layers and max(layers) >= n_q:

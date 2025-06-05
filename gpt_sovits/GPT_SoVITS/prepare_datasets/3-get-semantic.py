@@ -116,7 +116,6 @@ if __name__ == "__main__":
             try:
                 wav_name, spk_name, language, text = line.split("|")
                 wav_name = dataPrep_utils.clean_path(wav_name)
-                # wav_name = os.path.basename(wav_name)
                 wav_name = os.path.sep.join(wav_name.split(os.path.sep)[1:])
                 name2go(wav_name, lines1)
             except:
