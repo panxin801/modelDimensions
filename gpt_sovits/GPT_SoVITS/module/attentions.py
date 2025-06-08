@@ -78,7 +78,7 @@ class Encoder(nn.Module):
 
             y = self.ffn_layers[i](x, x_mask)
             y = self.drop(y)
-            x = self.norm_layers_2[i][x + y]
+            x = self.norm_layers_2[i](x + y)
         x = x * x_mask
         return x
 

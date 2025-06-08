@@ -86,8 +86,8 @@ class TextEncoder(nn.Module):
         y = self.ssl_proj(y * y_mask) * y_mask
         y = self.encoder_ssl(y * y_mask, y_mask)
 
-        text_mask = torch.unsqueeaze(commons.sequence_mask(
-            text_lengths, text.size(1)), 1).tO(y.dtype)
+        text_mask = torch.unsqueeze(commons.sequence_mask(
+            text_lengths, text.size(1)), 1).to(y.dtype)
         if test == 1:
             text[:, :] = 0
         text = self.text_embedding(text).transpose(1, 2)
@@ -204,7 +204,7 @@ class CFM(nn.Module):
         return x
 
     def forward(self, x1, x_lens, prompt_lens, mu, use_grad_ckpt):
-        b, _, t = x1.shape()
+        b, _, t = x1.shape
         t = torch.rand([b], device=mu.device, dtype=x1.dtype)
         x0 = torch.randn_like(x1, device=mu.device)
         vt = x1 - x0
@@ -347,7 +347,7 @@ class SynthesizerTrnV3(nn.Module):
     def forward(
         self, ssl, y, mel, ssl_lengths, y_lengths, text, text_lengths, mel_lengths, use_grad_ckpt
     ):  # ssl_lengths no need now
-        with autocast(enabled=False):
+        with autocast(device_type="cuda", enabled=False):
             y_mask = torch.unsqueeze(commons.sequence_mask(
                 y_lengths, y.size(2)), 1).to(y.dtype)
             ge = self.ref_enc(y[:, :704] * y_mask, y_mask)
@@ -412,10 +412,39 @@ class SynthesizerTrnV3(nn.Module):
     def extract_latent(self, x):
         """
         x: [B,D=768,F], cnhubert extract from 32k wavs
-        return: 
+        return:
         codes.transpose=[D,B,F/2]
         """
         ssl = self.ssl_proj(x)  # [b,D,F/2]
         quantized, codes, commit_loss, quantized_list = self.quantizer(
             ssl)  # codes 是残差后的ssl index, quantized 是残差后的ssl rvq 码本值
         return codes.transpose(0, 1)
+
+
+if __name__ == "__main__":
+    import os
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+    import utils
+    hps = utils.get_hparams(stage=2)
+
+    ssl = torch.randn(1, 768, 160).cuda()
+    spec = torch.randn(1, 1025, 160).cuda()
+    mel = torch.randn(1, 100, 32).cuda()
+    ssl_lengths = torch.LongTensor([158])
+    spec_lengths = torch.LongTensor([158]).cuda()
+    text = torch.randint(0, 100, (1, 25)).cuda()
+    text_lengths = torch.LongTensor([25]).cuda()
+    mel_lengths = torch.LongTensor([317]).cuda()
+    use_grad_ckpt = False
+
+    model = SynthesizerTrnV3(
+        hps.data.filter_length // 2 + 1,
+        hps.train.segment_size // hps.data.hop_length,
+        n_speakers=hps.data.n_speakers,
+        **hps.model
+    )
+    model.train().cuda()
+    rets = model(ssl, spec, mel, ssl_lengths, spec_lengths,
+                 text, text_lengths, mel_lengths, use_grad_ckpt=use_grad_ckpt)
+    print(rets.shape)
