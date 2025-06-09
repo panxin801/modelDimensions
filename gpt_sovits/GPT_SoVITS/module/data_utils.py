@@ -4,9 +4,11 @@ import traceback
 import torch
 import torch.utils.data as Data
 import torch.nn.functional as F
+import sys
 from tqdm import tqdm
 
-from tools.my_utils import load_audio
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from tools.dataPrep_utils import load_audio
 from module.mel_processing import (spectrogram_torch, spec_to_mel_torch)
 from text import cleaned_text_to_sequence
 
@@ -253,8 +255,8 @@ class TextAudioSpeakerLoaderV3(torch.utils.data.Dataset):
     def __init__(self, hparams, val=False):
         exp_dir = hparams.exp_dir
         self.path2 = f"{exp_dir}/2-name2text.txt"
-        self.path4 = f"{exp_dir}/4-cnhubert/wavs"
-        self.path5 = f"{exp_dir}/5-wav32k/wavs"
+        self.path4 = f"{exp_dir}/4-cnhubert/Wave"
+        self.path5 = f"{exp_dir}/5-wav32k/Wave"
         assert os.path.exists(self.path2)
         assert os.path.exists(self.path4)
         assert os.path.exists(self.path5)
@@ -501,8 +503,8 @@ class TextAudioSpeakerLoaderV4(torch.utils.data.Dataset):
     def __init__(self, hparams, val=False):
         exp_dir = hparams.exp_dir
         self.path2 = f"{exp_dir}/2-name2text.txt"
-        self.path4 = f"{exp_dir}/4-cnhubert/wavs"
-        self.path5 = f"{exp_dir}/5-wav32k/wavs"
+        self.path4 = f"{exp_dir}/4-cnhubert/Wave"
+        self.path5 = f"{exp_dir}/5-wav32k/Wave"
         assert os.path.exists(self.path2)
         assert os.path.exists(self.path4)
         assert os.path.exists(self.path5)
@@ -722,8 +724,8 @@ class TextAudioSpeakerLoaderV3b(torch.utils.data.Dataset):
     def __init__(self, hparams, val=False):
         exp_dir = hparams.exp_dir
         self.path2 = f"{exp_dir}/2-name2text.txt"
-        self.path4 = f"{exp_dir}/4-cnhubert/wavs"
-        self.path5 = f"{exp_dir}/5-wav32k/wavs"
+        self.path4 = f"{exp_dir}/4-cnhubert/Wave"
+        self.path5 = f"{exp_dir}/5-wav32k/Wave"
         assert os.path.exists(self.path2)
         assert os.path.exists(self.path4)
         assert os.path.exists(self.path5)

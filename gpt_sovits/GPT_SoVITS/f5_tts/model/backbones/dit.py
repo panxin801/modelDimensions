@@ -58,7 +58,7 @@ class TextEmbedding(nn.Module):
         if self.extra_modeling:
             # sinus pos emb
             batch_start = torch.zeros((batch,), dtype=torch.long)
-            pos_idx = get_pos_embed_indices(batch_start, seq_len, max_post=self.precompute_max_pos
+            pos_idx = get_pos_embed_indices(batch_start, seq_len, max_pos=self.precompute_max_pos
                                             )
             text_pos_emb = self.freqs_cis[pos_idx]
 
