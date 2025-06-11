@@ -219,7 +219,7 @@ def finetuneGPT(batch_size,
     with open(tmp_config_path, "wt", encoding="utf8") as f:
         f.write(yaml.dump(data, default_flow_style=False))
     # cmd = '"%s" GPT_SoVITS/s1_train.py --config_file "%s" --train_semantic_path "%s/6-name2semantic.tsv" --train_phoneme_path "%s/2-name2text.txt" --output_dir "%s/logs_s1"'%(python_exec,tmp_config_path,s1_dir,s1_dir,s1_dir)
-    cmd = f"{python_exec} GPT_SoVITS/s1_train.py --config_file {tmp_config_path}"
+    cmd = f"{python_exec} GPT_SoVITS/s1_train.py --config {tmp_config_path}"
     print(cmd)
     p = Popen(cmd, shell=True)
     p.wait()

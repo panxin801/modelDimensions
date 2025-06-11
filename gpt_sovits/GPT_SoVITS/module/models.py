@@ -373,7 +373,7 @@ class CFM(nn.Module):
             xt, prompt, x_lens, t, dt, mu, use_grad_ckpt).transpose(2, 1)
         loss = 0
         for i in range(b):
-            loss += self.criterion(vt_pred[i, :, prompt_lens[i]                                   : x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
+            loss += self.criterion(vt_pred[i, :, prompt_lens[i]: x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
         loss /= b
 
         return loss

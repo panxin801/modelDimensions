@@ -2,9 +2,12 @@ import traceback
 import shutil
 import os
 import torch
+import sys
 from collections import OrderedDict
 from time import time as ttime
 
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+print(sys.path)
 from tools.i18n.i18n import I18nAuto
 
 i18n = I18nAuto()
@@ -13,9 +16,11 @@ i18n = I18nAuto()
 def my_save(fea, path):  # fix issue: torch.save doesn't support chinese path
     dir = os.path.dirname(path)
     name = os.path.basename(path)
-    tmp_path = "%s.pth" % (ttime())
+    tmp_path = f"{ttime()}.pth"
     torch.save(fea, tmp_path)
-    shutil.move(tmp_path, "%s/%s" % (dir, name))
+    if not os.path.exists(dir):
+        os.makedirs(dir, exist_ok=True)
+    shutil.move(tmp_path, f"{dir}/{name}")
 
 
 """
