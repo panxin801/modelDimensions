@@ -7,7 +7,6 @@ from collections import OrderedDict
 from time import time as ttime
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-print(sys.path)
 from tools.i18n.i18n import I18nAuto
 
 i18n = I18nAuto()

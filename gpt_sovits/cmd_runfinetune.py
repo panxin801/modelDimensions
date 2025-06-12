@@ -249,19 +249,19 @@ def main(args):
         if_grad_ckpt = False  # v3是否开启梯度检查点节省显存占用
         lora_rank = 32  # LoRA秩, "16", "32", "64", "128"
 
-        # finetunesovits(batch_size,
-        #                total_epoch,
-        #                args.expname,
-        #                text_low_lr_rate,
-        #                if_save_latest,
-        #                if_save_every_weights,
-        #                save_every_epoch,
-        #                gpu_numbers1Ba,
-        #                pretrained_s2G,
-        #                pretrained_s2D,
-        #                if_grad_ckpt,
-        #                lora_rank,
-        #                args.version)
+        finetunesovits(batch_size,
+                       total_epoch,
+                       args.expname,
+                       text_low_lr_rate,
+                       if_save_latest,
+                       if_save_every_weights,
+                       save_every_epoch,
+                       gpu_numbers1Ba,
+                       pretrained_s2G,
+                       pretrained_s2D,
+                       if_grad_ckpt,
+                       lora_rank,
+                       args.version)
 
     if args.start <= 1 and args.end >= 1:
         print("Stage 1: 微调GPT")
@@ -275,16 +275,16 @@ def main(args):
         gpu_numbers1Bb = "0"  # GPU卡号以-分割，每个卡号一个进程
         pretrained_s1 = pretrained_gpt_name[int(args.version[-1]) - 1]
 
-        finetuneGPT(batch_size,
-                    total_epoch,
-                    args.expname,
-                    if_dpo,
-                    if_save_latest,
-                    if_save_every_weights,
-                    save_every_epoch,
-                    gpu_numbers1Bb,
-                    pretrained_s1,
-                    args.version)
+        # finetuneGPT(batch_size,
+        #             total_epoch,
+        #             args.expname,
+        #             if_dpo,
+        #             if_save_latest,
+        #             if_save_every_weights,
+        #             save_every_epoch,
+        #             gpu_numbers1Bb,
+        #             pretrained_s1,
+        #             args.version)
 
     print("All ok")
 
