@@ -5,3 +5,4 @@ __pycache__
 .vscode
 logs
 GPT_weights*
+SoVITS_weights*

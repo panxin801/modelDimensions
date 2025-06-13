@@ -1,10 +1,13 @@
 import torch
 import json
 import os
+from peft import (LoraConfig, get_peft_model)
 
 from AR.models.t2s_lightning_module import Text2SemanticLightningModule
-from process_ckpt import get_sovits_version_from_path_fast
+from process_ckpt import (get_sovits_version_from_path_fast, load_sovits_new)
 from tools.i18n.i18n import I18nAuto
+from GPT_SoVITS.module.models import (
+    SynthesizerTrn, SynthesizerTrnV3, Generator)
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -14,6 +17,7 @@ path_sovits_v3 = "GPT_SoVITS/pretrained_models/s2Gv3.pth"
 path_sovits_v4 = "GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth"
 is_exist_s2gv3 = os.path.exists(path_sovits_v3)
 is_exist_s2gv4 = os.path.exists(path_sovits_v4)
+v3v4set = {"v3", "v4"}
 
 i18n = I18nAuto()
 dict_language_v1 = {
@@ -37,6 +41,34 @@ dict_language_v2 = {
     i18n("多语种混合"): "auto",  # 多语种启动切分识别语种
     i18n("多语种混合(粤语)"): "auto_yue",  # 多语种启动切分识别语种
 }
+
+
+class DictToAttrRecursive(dict):
+    def __init__(self, input_dict):
+        super().__init__(input_dict)
+        for key, value in input_dict.items():
+            if isinstance(value, dict):
+                value = DictToAttrRecursive(value)
+            self[key] = value
+            setattr(self, key, value)
+
+    def __getattr__(self, item):
+        try:
+            return self[item]
+        except KeyError:
+            raise AttributeError(f"Attribute {item} not found")
+
+    def __setattr__(self, key, value):
+        if isinstance(value, dict):
+            value = DictToAttrRecursive(value)
+        super(DictToAttrRecursive, self).__setitem__(key, value)
+        super().__setattr__(key, value)
+
+    def __delattr__(self, item):
+        try:
+            del self[item]
+        except KeyError:
+            raise AttributeError(f"Attribute {item} not found")
 
 
 def change_gpt_weights(gpt_path):
@@ -63,7 +95,6 @@ def change_gpt_weights(gpt_path):
 
 
 def change_sovits_weights(sovits_path, prompt_language=None, text_language=None):
-    print("111")
     version, model_version, if_lora_v3 = get_sovits_version_from_path_fast(
         sovits_path)
     print(sovits_path, version, model_version, if_lora_v3)
@@ -76,44 +107,71 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
         raise FileExistsError(info)
 
     dict_language = dict_language_v1 if version == "v1" else dict_language_v2
-    if prompt_language is not None and text_language is not None:
-        if prompt_language in list(dict_language.keys()):
-            prompt_text_update, prompt_language_update = (
-                {"__type__": "update"},
-                {"__type__": "update", "value": prompt_language},
-            )
-        else:
-            prompt_text_update = {"__type__": "update", "value": ""}
-            prompt_language_update = {
-                "__type__": "update", "value": i18n("中文")}
-        if text_language in list(dict_language.keys()):
-            text_update, text_language_update = {"__type__": "update"}, {
-                "__type__": "update", "value": text_language}
-        else:
-            text_update = {"__type__": "update", "value": ""}
-            text_language_update = {"__type__": "update", "value": i18n("中文")}
-        if model_version in v3v4set:
-            visible_sample_steps = True
-            visible_inp_refs = False
-        else:
-            visible_sample_steps = False
-            visible_inp_refs = True
-        yield (
-            {"__type__": "update", "choices": list(dict_language.keys())},
-            {"__type__": "update", "choices": list(dict_language.keys())},
-            prompt_text_update,
-            prompt_language_update,
-            text_update,
-            text_language_update,
-            {"__type__": "update", "visible": visible_sample_steps, "value": 32 if model_version ==
-                "v3"else 8, "choices": [4, 8, 16, 32, 64, 128]if model_version == "v3"else [4, 8, 16, 32]},
-            {"__type__": "update", "visible": visible_inp_refs},
-            {"__type__": "update", "value": False,
-                "interactive": True if model_version not in v3v4set else False},
-            {"__type__": "update", "visible": True if model_version == "v3" else False},
-            {"__type__": "update", "value": i18n(
-                "模型加载中，请等待"), "interactive": False},
+
+    dict_s2 = load_sovits_new(sovits_path)
+    hps = dict_s2["config"]
+    hps = DictToAttrRecursive(hps)
+    hps.model.semantic_frame_rate = "25hz"
+    if not "enc_p.text_embedding.weight" in dict_s2["weight"]:
+        hps.model.version = "v2"  # v3model,v2sybomls
+    elif dict_s2["weight"]["enc_p.text_embedding.weight"].shape[0] == 322:
+        hps.model.version = "v1"
+    else:
+        hps.model.version = "v2"
+    version = hps.model.version
+    print("sovits版本:", hps.model.version)
+
+    if not model_version in v3v4set:
+        vq_model = SynthesizerTrn(
+            hps.data.filter_length // 2 + 1,
+            hps.train.segment_size // hps.data.hop_length,
+            n_speakers=hps.data.n_speakers,
+            **hps.model,
         )
+        model_version = version
+    else:
+        hps.model.version = model_version
+        vq_model = SynthesizerTrnV3(
+            hps.data.filter_length // 2 + 1,
+            hps.train.segment_size // hps.data.hop_length,
+            n_speakers=hps.data.n_speakers,
+            **hps.model,
+        )
+
+    if not "pretrained" in sovits_path:
+        try:
+            del vq_model.enc_p
+        except:
+            pass
+    if is_half is True:
+        vq_model = vq_model.half()
+    vq_model = vq_model.to(device)
+    vq_model.eval()
+
+    if if_lora_v3 is False:
+        print(f"Loading sovits_{model_version}", vq_model.load_state_dict(
+            dict_s2["weight"], strict=False))
+    else:
+        path_sovits = path_sovits_v3 if model_version == "v3" else path_sovits_v4
+        print(f"Loading sovits_{model_version}pretrained_G", vq_model.load_state_dict(
+            load_sovits_new(path_sovits)["weight"], strict=False))
+        lora_rank = dict_s2["lora_rank"]
+        lora_confg = LoraConfig(target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+                                r=lora_rank,
+                                lora_alpha=lora_rank,
+                                init_lora_weights=True)
+        vq_model.cfm = get_peft_model(vq_model.cfm, lora_confg)
+        print(f"Loading sovits_{model_version}_lora{lora_rank}")
+        vq_model.load_state_dict(dict_s2["weight"], strict=False)
+        vq_model.cfm = vq_model.cfm.merge_and_unload()
+        vq_model.eval()
+
+    with open("./weight.json") as fr:
+        data = fr.read()
+        data = json.loads(data)
+        data["SoVITS"][version] = sovits_path
+    with open("./weight.json", "w") as fw:
+        fw.write(json.dumps(data))
 
 
 def get_tts_wav(

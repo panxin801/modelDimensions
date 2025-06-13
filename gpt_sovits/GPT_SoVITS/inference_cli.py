@@ -37,7 +37,7 @@ def synthesize(
 
     change_gpt_weights(gpt_path=GPT_model_path)
     print("11")
-    next(change_sovits_weights(sovits_path=SoVITS_model_path))
+    change_sovits_weights(sovits_path=SoVITS_model_path)
     print("22")
 
     # Synthesize audio
