@@ -36,9 +36,7 @@ def synthesize(
     # Change model weights
 
     change_gpt_weights(gpt_path=GPT_model_path)
-    print("11")
     change_sovits_weights(sovits_path=SoVITS_model_path)
-    print("22")
 
     # Synthesize audio
     synthesis_result = get_tts_wav(

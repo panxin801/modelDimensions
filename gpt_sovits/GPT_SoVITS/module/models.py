@@ -905,7 +905,7 @@ class SynthesizerTrnV3(nn.Module):
             sizee = int(codes.size(2) *
                         (3.875 if self.version == "v3"else 4) / speed) + 1
         y_lengths1 = torch.LongTensor([sizes]).to(codes.device)
-        text_lengths = torch.LongTensor([text.size(-1)]).tO(text.device)
+        text_lengths = torch.LongTensor([text.size(-1)]).to(text.device)
 
         quantized = self.quantizer.decode(codes)
         if self.semantic_frame_rate == "25hz":

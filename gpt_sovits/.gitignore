@@ -6,3 +6,4 @@ __pycache__
 logs
 GPT_weights*
 SoVITS_weights*
+weight.json
