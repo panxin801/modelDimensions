@@ -3,7 +3,8 @@ tools/uvr5/uvr5_weights
 data/
 __pycache__
 .vscode
-logs
+logs*
 GPT_weights*
 SoVITS_weights*
 weight.json
+TEMP

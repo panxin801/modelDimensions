@@ -132,7 +132,7 @@ def finetunesovits(batch_size,
 
     if dataPrep_utils.check_for_existance([s2_dir], is_train=True):
         dataPrep_utils.check_details([s2_dir], is_train=True)
-    if is_half == False:
+    if is_half is False:
         data["train"]["fp16_run"] = False
         batch_size = max(1, batch_size // 2)
     data["train"]["batch_size"] = batch_size

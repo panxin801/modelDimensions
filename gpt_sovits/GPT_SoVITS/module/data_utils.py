@@ -530,12 +530,11 @@ class TextAudioSpeakerLoaderV4(torch.utils.data.Dataset):
             self.audiopaths_sid_text = []
             for _ in range(max(2, int(min_num / leng))):
                 self.audiopaths_sid_text += tmp
-        self.max_wav_value = hparams.max_wav_value
-        self.sampling_rate = hparams.sampling_rate
-        self.filter_length = hparams.filter_length
-        self.hop_length = hparams.hop_length
-        self.win_length = hparams.win_length
-        self.sampling_rate = hparams.sampling_rate
+        self.max_wav_value = hparams.max_wav_value  # 32768
+        self.sampling_rate = hparams.sampling_rate  # 32000
+        self.filter_length = hparams.filter_length  # 2048
+        self.hop_length = hparams.hop_length  # 640
+        self.win_length = hparams.win_length  # 2048
         self.val = val
 
         random.seed(1234)
@@ -552,13 +551,14 @@ class TextAudioSpeakerLoaderV4(torch.utils.data.Dataset):
             try:
                 phoneme = self.phoneme_data[audiopath][0]
                 phoneme = phoneme.split(" ")
-                phoneme_ids = cleaned_text_to_sequence(phoneme, version)
+                phoneme_ids = cleaned_text_to_sequence(
+                    phoneme, version)  # phoneme 2 int ids
             except Exception:
                 print(f"{audiopath} not in self.phoneme_data !")
                 skipped_phone += 1
                 continue
 
-            size = os.path.getsize("%s/%s" % (self.path5, audiopath))
+            size = os.path.getsize(f"{self.path5}/{audiopath}")
             duration = size / self.sampling_rate / 2
 
             if duration == 0:
@@ -595,10 +595,10 @@ class TextAudioSpeakerLoaderV4(torch.utils.data.Dataset):
         audiopath, phoneme_ids = audiopath_sid_text
         text = torch.FloatTensor(phoneme_ids)
         try:
-            spec, mel = self.get_audio("%s/%s" % (self.path5, audiopath))
-            with torch.no_grad():
-                ssl = torch.load("%s/%s.pt" %
-                                 (self.path4, audiopath), map_location="cpu")
+            spec, mel = self.get_audio(f"{self.path5}/{audiopath}")
+            with torch.inference_mode():
+                ssl = torch.load(
+                    f"{self.path4}/{audiopath}.pt", map_location="cpu")
                 if ssl.shape[-1] != spec.shape[-1]:
                     typee = ssl.dtype
                     ssl = F.pad(ssl.float(), (0, 1),
