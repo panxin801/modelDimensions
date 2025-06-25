@@ -275,16 +275,16 @@ def main(args):
         gpu_numbers1Bb = "0"  # GPU卡号以-分割，每个卡号一个进程
         pretrained_s1 = pretrained_gpt_name[int(args.version[-1]) - 1]
 
-        # finetuneGPT(batch_size,
-        #             total_epoch,
-        #             args.expname,
-        #             if_dpo,
-        #             if_save_latest,
-        #             if_save_every_weights,
-        #             save_every_epoch,
-        #             gpu_numbers1Bb,
-        #             pretrained_s1,
-        #             args.version)
+        finetuneGPT(batch_size,
+                    total_epoch,
+                    args.expname,
+                    if_dpo,
+                    if_save_latest,
+                    if_save_every_weights,
+                    save_every_epoch,
+                    gpu_numbers1Bb,
+                    pretrained_s1,
+                    args.version)
 
     print("All ok")
 

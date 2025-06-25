@@ -43,7 +43,7 @@ class SinePositionalEmbedding(nn.Module):
         self.embedding_dim = embedding_dim
         self.x_scale = math.sqrt(embedding_dim) if scale else 1.0
         self.alpha = nn.Parameter(torch.ones(1), requires_grad=alpha)
-        self.dropout = torch.nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(p=dropout)
 
         self.reverse = False
         self.pe = None
@@ -51,7 +51,7 @@ class SinePositionalEmbedding(nn.Module):
 
     def extend_pe(self, x):
         """Reset the positional encodings."""
-        if self.pe is not None:
+        if not self.pe is None:
             if self.pe.size(1) >= x.size(1):
                 if self.pe.dtype != x.dtype or self.pe.device != x.device:
                     self.pe = self.pe.to(dtype=x.dtype, device=x.device)

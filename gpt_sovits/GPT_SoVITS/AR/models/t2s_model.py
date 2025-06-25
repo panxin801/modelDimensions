@@ -246,16 +246,15 @@ class Text2SemanticDecoder(nn.Module):
     def __init__(self, config, norm_first=False, top_k=3):
         super().__init__()
 
-        self.model_dim = config["model"]["hidden_dim"]
-        self.embedding_dim = config["model"]["embedding_dim"]
-        self.num_head = config["model"]["head"]
-        self.num_layers = config["model"]["n_layer"]
-        self.norm_first = norm_first
-        self.vocab_size = config["model"]["vocab_size"]
-        self.phoneme_vocab_size = config["model"]["phoneme_vocab_size"]
-        self.p_dropout = config["model"]["dropout"]
-        self.EOS = config["model"]["EOS"]
-        self.norm_first = norm_first
+        self.model_dim = config["model"]["hidden_dim"]  # 512
+        self.embedding_dim = config["model"]["embedding_dim"]  # 512
+        self.num_head = config["model"]["head"]  # 16
+        self.num_layers = config["model"]["n_layer"]  # 24
+        self.norm_first = norm_first  # False
+        self.vocab_size = config["model"]["vocab_size"]  # 1025
+        self.phoneme_vocab_size = config["model"]["phoneme_vocab_size"]  # 732
+        self.p_dropout = config["model"]["dropout"]  # 0
+        self.EOS = config["model"]["EOS"]  # 1024
         assert self.EOS == self.vocab_size - 1
         # should be same as num of kmeans bin
         # assert self.EOS == 1024
@@ -360,7 +359,8 @@ class Text2SemanticDecoder(nn.Module):
     def forward(self, x, x_lens, y, y_lens, bert_feature):
         """
         x: phoneme_ids
-        y: semantic_ids
+        y: semantic_ids, from vq_model.extract_latent
+        bert_feature: bert feature from text
         """
 
         reject_y, reject_y_lens = make_reject_y(y, y_lens)
@@ -402,15 +402,18 @@ class Text2SemanticDecoder(nn.Module):
 
     def forward_old(self, x, x_lens, y, y_lens, bert_feature):
         """
-        x: phoneme_ids
-        y: semantic_ids
+        x: phoneme_ids: [B, T_phone, 512]
+        x_lens: [B]
+        y: semantic_ids, from vq_model.extract_latent  [B, T_semantic]
+        y_lens: [B]
+        bert_feature: bert feature from text # [B, 1024, T_phone]
         """
         x = self.ar_text_embedding(x)
         x = x + self.bert_proj(bert_feature.transpose(1, 2))
         x = self.ar_text_position(x)
-        x_mask = make_pad_mask(x_lens)
 
-        y_mask = make_pad_mask(y_lens)
+        x_mask = make_pad_mask(x_lens)  # [B, T_phone]
+        y_mask = make_pad_mask(y_lens)  # [B, T_semantic]
         y_mask_int = y_mask.type(torch.int64)
         codes = y.type(torch.int64) * (1 - y_mask_int)
 
@@ -419,17 +422,18 @@ class Text2SemanticDecoder(nn.Module):
         y, targets = self.pad_y_eos(codes, y_mask_int, eos_id=self.EOS)
         x_len = x_lens.max()
         y_len = y_lens.max()
-        y_emb = self.ar_audio_embedding(y)
+        y_emb = self.ar_audio_embedding(y)  # [B,T_audio,512]
         y_pos = self.ar_audio_position(y_emb)
 
-        xy_padding_mask = torch.concat([x_mask, y_mask], dim=1)
+        xy_padding_mask = torch.concat(
+            [x_mask, y_mask], dim=1)  # [B,T_phone+T_audio]
         ar_xy_padding_mask = xy_padding_mask
 
         x_attn_mask = F.pad(
             torch.zeros((x_len, x_len), dtype=torch.bool, device=x.device),
             (0, y_len),
             value=True,
-        )
+        )  # [x_len ,x_len+y_len]
         y_attn_mask = F.pad(
             torch.triu(
                 torch.ones(y_len, y_len, dtype=torch.bool, device=x.device),
@@ -437,7 +441,7 @@ class Text2SemanticDecoder(nn.Module):
             ),
             (x_len, 0),
             value=False,
-        )
+        )  # [y_len,x_len+y_len]
         xy_attn_mask = torch.concat([x_attn_mask, y_attn_mask], dim=0)
         bsz, src_len = x.shape[0], x_len + y_len
         _xy_padding_mask = (
@@ -450,11 +454,11 @@ class Text2SemanticDecoder(nn.Module):
         new_attn_mask.masked_fill_(xy_attn_mask, float("-inf"))
         xy_attn_mask = new_attn_mask
         # x 和完整的 y 一次性输入模型
-        xy_pos = torch.concat([x, y_pos], dim=1)
+        xy_pos = torch.concat([x, y_pos], dim=1)  # [B,T_phone+T_audio,512]
         xy_dec, _ = self.h(
             (xy_pos, None),
             mask=xy_attn_mask,
-        )
+        )  # [B,T_phone+T_audio,512]
         logits = self.ar_predict_layer(xy_dec[:, x_len:]).permute(0, 2, 1)
         # loss
         # from feiteng: 每次 duration 越多, 梯度更新也应该更多, 所以用 sum

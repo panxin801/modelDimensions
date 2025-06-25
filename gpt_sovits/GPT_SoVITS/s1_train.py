@@ -10,7 +10,7 @@ import torch
 import platform
 from collections import OrderedDict
 from pathlib import Path
-from pytorch_lightning import Trainer, seed_everything
+from pytorch_lightning import (Trainer, seed_everything)
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger  # WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
@@ -38,10 +38,10 @@ class my_model_ckpt(ModelCheckpoint):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.if_save_latest = if_save_latest
-        self.if_save_every_weights = if_save_every_weights
-        self.half_weights_save_dir = half_weights_save_dir
-        self.exp_name = exp_name
+        self.if_save_latest = if_save_latest  # False
+        self.if_save_every_weights = if_save_every_weights  # True
+        self.half_weights_save_dir = half_weights_save_dir  # GPT_weights_v4
+        self.exp_name = exp_name  # TestA1
         self.config = config
 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -79,7 +79,7 @@ class my_model_ckpt(ModelCheckpoint):
 
 
 def main(args):
-    config = load_yaml_config(args.config)
+    config = load_yaml_config(args.config)  # config is a dict
 
     output_dir = Path(config["output_dir"])
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -88,22 +88,26 @@ def main(args):
     ckpt_dir.mkdir(exist_ok=True, parents=True)
 
     seed_everything(config["train"]["seed"], workers=True)
-    ckpt_callback: ModelCheckpoint = my_model_ckpt(
+    ckpt_callback: ModelCheckpoint = my_model_ckpt(  # 检查点回调函数
         config=config,
-        if_save_latest=config["train"]["if_save_latest"],
-        if_save_every_weights=config["train"]["if_save_every_weights"],
+        if_save_latest=config["train"]["if_save_latest"],  # False
+        if_save_every_weights=config["train"]["if_save_every_weights"],  # True
+        # GPT_weights_v4
         half_weights_save_dir=config["train"]["half_weights_save_dir"],
         exp_name=config["train"]["exp_name"],
         save_top_k=-1,
         monitor="top_3_acc",
         mode="max",
         save_on_train_epoch_end=True,
-        every_n_epochs=config["train"]["save_every_n_epoch"],
+        every_n_epochs=config["train"]["save_every_n_epoch"],  # 1
         dirpath=ckpt_dir,
     )
-    logger = TensorBoardLogger(name=output_dir.stem, save_dir=output_dir)
+    logger = TensorBoardLogger(
+        name=output_dir.stem, save_dir=output_dir)  # 记录日志
+    # MASTER_ADDR和USE_LIBUV用于分布式训练，在windows上需要设置为0
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["USE_LIBUV"] = "0"
+
     trainer: Trainer = Trainer(
         max_epochs=config["train"]["epochs"],
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
@@ -115,7 +119,7 @@ def main(args):
             process_group_backend="nccl" if platform.system() != "Windows" else "gloo")
         if torch.cuda.is_available()
         else "auto",
-        precision=config["train"]["precision"],
+        precision=config["train"]["precision"],  # 32
         logger=logger,
         num_sanity_val_steps=0,
         callbacks=[ckpt_callback],
@@ -123,15 +127,18 @@ def main(args):
     )
 
     model: Text2SemanticLightningModule = Text2SemanticLightningModule(
-        config, output_dir)
+        config, output_dir)  # AR 模型实例
 
     data_module: Text2SemanticDataModule = Text2SemanticDataModule(
         config,
+        # 'logs/TestA1/6-name2semantic.tsv'
         train_semantic_path=config["train_semantic_path"],
+        # 'logs/TestA1/2-name2text.txt'
         train_phoneme_path=config["train_phoneme_path"],
         # dev_semantic_path=args.dev_semantic_path,
         # dev_phoneme_path=args.dev_phoneme_path
-    )
+    )  # AR 数据模块实例，负责数据加载
+
     try:
         # 使用正则表达式匹配文件名中的数字部分，并按数字大小进行排序
         newest_ckpt_name = get_newest_ckpt(os.listdir(ckpt_dir))
@@ -139,7 +146,7 @@ def main(args):
     except Exception:
         ckpt_path = None
     print(f"ckpt_path: {ckpt_path}")
-    trainer.fit(model, data_module, ckpt_path=ckpt_path)
+    trainer.fit(model, data_module, ckpt_path=ckpt_path)  # 开始训练
 
 
 # srun --gpus-per-node=1 --ntasks-per-node=1 python train.py --path-to-configuration configurations/default.yaml
