@@ -614,9 +614,9 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
 
 def get_tts_wav(
     ref_wav_path,
-    prompt_text,
+    prompt_text,  # 标注文本
     prompt_language,
-    text,
+    text,  # 生成文本
     text_language,
     how_to_cut=i18n("不切"),
     top_k=20,
@@ -652,8 +652,8 @@ def get_tts_wav(
     print(i18n("实际输入的目标文本:"), text)
     zero_wav = np.zeros(
         int(hps.data.sampling_rate * pause_second),
-        dtype=np.float16 if is_half == True else np.float32,
-    )
+        dtype=np.float16 if is_half is True else np.float32,
+    )  # 空白音频
     zero_wav_torch = torch.from_numpy(zero_wav)
     if is_half is True:
         zero_wav_torch = zero_wav_torch.half().to(device)
@@ -661,7 +661,7 @@ def get_tts_wav(
         zero_wav_torch = zero_wav_torch.to(device)
     if not ref_free:
         with torch.inference_mode():
-            wav16k, sr = librosa.load(ref_wav_path, sr=16000)
+            wav16k, sr = librosa.load(ref_wav_path, sr=16000)  # 参考音频
             if wav16k.shape[0] > 160000 or wav16k.shape[0] < 48000:
                 print(i18n("参考音频在3~10秒范围外，请更换！"))
                 raise OSError(i18n("参考音频在3~10秒范围外，请更换！"))
@@ -670,15 +670,17 @@ def get_tts_wav(
                 wav16k = wav16k.half().to(device)
             else:
                 wav16k = wav16k.to(device)
+            # 参考音频后拼接空白音频, size=[80000]
             wav16k = torch.cat([wav16k, zero_wav_torch])
 
             # SSL
             ssl_content = ssl_model.model(wav16k.unsqueeze(0))[
-                "last_hidden_state"].transpose(1, 2)  # float()
-            codes = vq_model.extract_latent(ssl_content)
-            prompt_semantic = codes[0, 0]
+                "last_hidden_state"].transpose(1, 2)  # float16(), [B,768, T_semantic=249]
+            codes = vq_model.extract_latent(
+                ssl_content)  # [B,1,floor(T_semantic/2)=124]
+            prompt_semantic = codes[0, 0]  # [floor(T_semantic/2)]
             prompt = prompt_semantic.unsqueeze(0).to(device)
-            print(prompt.shape)
+            print(prompt.shape)  # [1,floor(T_semantic/2)]
 
     t1 = ttime()
     t.append(t1 - t0)
@@ -698,12 +700,14 @@ def get_tts_wav(
         text = text.replace("\n\n", "\n")
     print(i18n("实际输入的目标文本(切句后):"), text)
     texts = text.split("\n")
-    texts = process_text(texts)
-    texts = merge_short_text_in_array(texts, 5)
+    texts = process_text(texts)  # 处理空白
+    texts = merge_short_text_in_array(texts, 5)  # 合并短句后的TTS目标文本
 
     audio_opt = []
     # s2v3暂不支持ref_free
     if not ref_free:
+        # phones1 is list, len=30, define as T_phoneme1. bert1 [1024, T_phoneme1]
+        # 这里处理的是参考文本
         phones1, bert1, norm_text1 = get_phones_and_bert(
             prompt_text, prompt_language, version)
 
@@ -715,20 +719,24 @@ def get_tts_wav(
         if not text[-1] in splits:
             text += "。" if text_language != "en" else "."
         print(i18n("实际输入的目标文本(每句):"), text)
+        # phones2 is list, len=11, define as T_phoneme2. bert2 [1024, T_phoneme2], len(norm_text2)=文本长度
+        # 这里处理的是目标文本
         phones2, bert2, norm_text2 = get_phones_and_bert(
             text, text_language, version)
         print(i18n("前端处理后的文本(每句):"), norm_text2)
 
         if not ref_free:
+            # [B, T_phoneme2+T_phoneme1]
             bert = torch.cat([bert1, bert2], dim=1)
             all_phoneme_ids = torch.LongTensor(
-                phones1 + phones2).to(device).unsqueeze(0)
+                phones1 + phones2).to(device).unsqueeze(0)  # [1, T_phoneme2+T_phoneme1]
         else:
             bert = bert2
             all_phoneme_ids = torch.LongTensor(phones2).to(device).unsqueeze(0)
 
-        bert = bert.to(dtype).unsqueeze(0)
-        all_phoneme_len = torch.tensor([all_phoneme_ids.shape[1]]).to(device)
+        bert = bert.to(dtype).unsqueeze(0)  # [B, 1, T_phoneme2+T_phoneme1]
+        all_phoneme_len = torch.tensor(
+            [all_phoneme_ids.shape[1]]).to(device)  # [1]=41
 
         t2 = ttime()
         if i_text in cache and if_freeze is True:
@@ -736,14 +744,15 @@ def get_tts_wav(
         else:
             with torch.inference_mode():
                 pred_semantic, idx = t2s_model.model.infer_panel(
-                    all_phoneme_ids,
+                    all_phoneme_ids,  # 全部音素token
                     all_phoneme_len,
-                    None if ref_free else prompt,
-                    bert,
+                    None if ref_free else prompt,  # 参考音频SSL
+                    bert,  # 全部文本Bert
                     top_k=top_k,
                     top_p=top_p,
                     temperature=temperature,
                     early_stop_num=hz * max_sec)
+                # [1,1,idx=38], 最后idx个
                 pred_semantic = pred_semantic[:, -idx:].unsqueeze(0)
                 cache[i_text] = pred_semantic
         t3 = ttime()
@@ -765,11 +774,14 @@ def get_tts_wav(
             audio = vq_model.decode(pred_semantic, torch.LongTensor(
                 phones2).to(device).unsqueeze(0), refers, speed=speed)[0][0]  # .cpu().detach().numpy()
         else:
-            refer = get_spepc(hps, ref_wav_path).to(device).to(dtype)
-            phoneme_ids0 = torch.LongTensor(phones1).to(device).unsqueeze(0)
-            phoneme_ids1 = torch.LongTensor(phones2).to(device).unsqueeze(0)
+            refer = get_spepc(hps, ref_wav_path).to(
+                device).to(dtype)  # [1,1025, T_refwav=220]
+            phoneme_ids0 = torch.LongTensor(phones1).to(
+                device).unsqueeze(0)  # [1, T_phoneme1]
+            phoneme_ids1 = torch.LongTensor(phones2).to(
+                device).unsqueeze(0)  # [1, T_phoneme2]
             fea_ref, ge = vq_model.decode_encp(
-                prompt.unsqueeze(0), phoneme_ids0, refer)
+                prompt.unsqueeze(0), phoneme_ids0, refer)  # [1,512,T=496],[1,512,1]
             ref_audio, sr = torchaudio.load(ref_wav_path)
             ref_audio = ref_audio.to(device).float()
             if ref_audio.size(0) == 2:
@@ -778,36 +790,39 @@ def get_tts_wav(
             if sr != tgt_sr:
                 ref_audio = resample(ref_audio, sr, tgt_sr)
             mel2 = mel_fn(
-                ref_audio) if model_version == "v3" else mel_fn_v4(ref_audio)
+                ref_audio) if model_version == "v3" else mel_fn_v4(ref_audio)  # [1,100,T=440]
             mel2 = norm_spec(mel2)
-            T_min = min(mel2.size(2), fea_ref.size(2))
-            mel2 = mel2[:, :, :T_min]
-            fea_ref = fea_ref[:, :, :T_min]
+            T_min = min(mel2.size(2), fea_ref.size(2))  # min(440,496)
+            mel2 = mel2[:, :, :T_min]  # [1,100,440]
+            fea_ref = fea_ref[:, :, :T_min]  # [1,512,440]
             Tref = 468 if model_version == "v3"else 500
             Tchunk = 934 if model_version == "v3"else 1000
             if T_min > Tref:
                 mel2 = mel2[:, :, -Tref:]
                 fea_ref = fea_ref[:, :, -Tref:]
                 T_min = Tref
-            chunk_len = Tchunk - T_min
+            chunk_len = Tchunk - T_min  # 560
             mel2 = mel2.to(dtype)
             fea_todo, ge = vq_model.decode_encp(
-                pred_semantic, phoneme_ids1, refer, ge, speed)
+                pred_semantic, phoneme_ids1, refer, ge, speed)  # [1,512,136],[1,512,1]
             cfm_ress = []
             idx = 0
             while 1:
-                fea_todo_chunk = fea_todo[:, :, idx:idx + chunk_len]
+                # 不足chunk_len就读到末尾
+                fea_todo_chunk = fea_todo[:, :,
+                                          idx:idx + chunk_len]  # [1,512,136]
                 if fea_todo_chunk.size(-1) == 0:
                     break
                 idx += chunk_len
-                fea = torch.cat([fea_ref, fea_todo_chunk], 2).transpose(2, 1)
+                fea = torch.cat([fea_ref, fea_todo_chunk],
+                                2).transpose(2, 1)  # [1,572,512]
                 cfm_res = vq_model.cfm.inference(fea, torch.LongTensor([fea.size(1)]).to(
-                    fea.device), mel2, sample_steps, inference_cfg_rate=0)
-                cfm_res = cfm_res[:, :, mel2.size(2):]
-                mel2 = cfm_res[:, :, -T_min:]
+                    fea.device), mel2, sample_steps, inference_cfg_rate=0)  # [1,100,588]
+                cfm_res = cfm_res[:, :, mel2.size(2):]  # [1,100,148]
+                mel2 = cfm_res[:, :, -T_min:]  # [1,100,148]
                 fea_ref = fea_todo_chunk[:, :, -T_min:]
-                cfm_ress.append(cfm_res)
-            cfm_res = torch.cat(cfm_ress, 2)
+                cfm_ress.append(cfm_res)  # [1,512,148]
+            cfm_res = torch.cat(cfm_ress, 2)  # [1,100,148]
             cfm_res = denorm_spec(cfm_res)
             if model_version == "v3":
                 if bigvgan_model is None:
@@ -817,13 +832,13 @@ def get_tts_wav(
                     init_hifigan()
             vocoder_model = bigvgan_model if model_version == "v3" else hifigan_model
             with torch.inference_mode():
-                wav_gen = vocoder_model(cfm_res)
-                audio = wav_gen[0][0]  # .cpu().detach().numpy()
+                wav_gen = vocoder_model(cfm_res)  # [1,1,71040]
+                audio = wav_gen[0][0]  # .cpu().detach().numpy() size=[71040]
         max_audio = torch.abs(audio).max()  # 简单防止16bit爆音
         if max_audio > 1:
             audio = audio / max_audio
         audio_opt.append(audio)
-        audio_opt.append(zero_wav_torch)  # zero_wav
+        audio_opt.append(zero_wav_torch)  # zero_wav 9600
 
         t4 = ttime()
         t.extend([t2 - t1, t3 - t2, t4 - t3])

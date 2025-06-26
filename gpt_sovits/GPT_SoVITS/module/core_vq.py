@@ -400,6 +400,10 @@ class ResidualVectorQuantization(nn.Module):
         return out_indices
 
     def decode(self, q_indices: torch.Tensor, st: int = 0) -> torch.Tensor:
+        """
+        q_indices: [1,1,124]
+        Return: [1,768,124]
+        """
         quantized_out = torch.tensor(0.0, device=q_indices.device)
         for i, indices in enumerate(q_indices):
             layer = self.layers[st + i]

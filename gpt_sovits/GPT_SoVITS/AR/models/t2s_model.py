@@ -130,78 +130,88 @@ class T2SBlock:
             return x * padding_mask
 
     def process_prompt(self,
+                       # xy_pos, [1,src_len,512] 全部文本token+参考音频token
                        x: torch.Tensor,
+                       # [1,self.num_head,src_len,src_len]
                        attn_mask: torch.Tensor,
                        padding_mask: Optional[torch.Tensor] = None,
                        torch_sdpa: bool = True):
         q, k, v = F.linear(self.to_mask(x, padding_mask),
-                           self.qkv_w, self.qkv_b).chunk(3, dim=-1)
+                           self.qkv_w, self.qkv_b).chunk(3, dim=-1)  # q=k=v=[1,src_len,512]
 
         batch_size = q.shape[0]
-        q_len = q.shape[1]
-        kv_len = k.shape[1]
+        q_len = q.shape[1]  # 165
+        kv_len = k.shape[1]  # 165
 
-        q = self.to_mask(q, padding_mask)
-        k_cache = self.to_mask(k, padding_mask)
-        v_cache = self.to_mask(v, padding_mask)
+        q = self.to_mask(q, padding_mask)  # [1,src_len,512]
+        k_cache = self.to_mask(k, padding_mask)  # [1,src_len,512]
+        v_cache = self.to_mask(v, padding_mask)  # [1,src_len,512]
 
-        q = q.view(batch_size, q_len, self.num_heads, -1).transpose(1, 2)
-        k = k.view(batch_size, kv_len, self.num_heads, -1).transpose(1, 2)
-        v = v.view(batch_size, kv_len, self.num_heads, -1).transpose(1, 2)
+        q = q.view(batch_size, q_len, self.num_heads, -
+                   1).transpose(1, 2)  # [1,self.num_head,src_len,512/self.num_head=32]
+        k = k.view(batch_size, kv_len, self.num_heads, -
+                   1).transpose(1, 2)  # [1,self.num_head,src_len,32]
+        v = v.view(batch_size, kv_len, self.num_heads, -
+                   1).transpose(1, 2)  # [1,self.num_head,src_len,32]
 
         if torch_sdpa:
+            # [1,self.num_head,src_len,512/self.num_head=32]
             attn = F.scaled_dot_product_attention(q, k, v, ~attn_mask)
         else:
             attn = scaled_dot_product_attention(q, k, v, attn_mask)
 
-        attn = attn.transpose(1, 2).reshape(batch_size, q_len, -1)
+        attn = attn.transpose(1, 2).reshape(
+            batch_size, q_len, -1)  # [1,src_len,512]
         attn = F.linear(self.to_mask(attn, padding_mask),
-                        self.out_w, self.out_b)
+                        self.out_w, self.out_b)  # [1,src_len,512]
 
-        x = x + attn
+        x = x + attn  # [1,src_len,512]
         x = F.layer_norm(x, [self.hidden_dim], self.norm_w1,
                          self.norm_b1, self.norm_eps1)
         x = x + self.mlp.forward(x)
         x = F.layer_norm(x, [self.hidden_dim], self.norm_w2,
                          self.norm_b2, self.norm_eps2)
-        return x, k_cache, v_cache
+        return x, k_cache, v_cache  # all are [1,src_len,512],
 
     def decode_next_token(self,
-                          x: torch.Tensor,
-                          k_cache: torch.Tensor,
-                          v_cache: torch.Tensor,
+                          x: torch.Tensor,  # 最后i一帧音频token, [1,1,512]
+                          k_cache: torch.Tensor,  # [1,src_len+n,512] 第n次预测就加n
+                          v_cache: torch.Tensor,  # [1,src_len+n,512] 第n次预测就加n
                           attn_mask: torch.Tensor = None,
                           torch_sdpa: bool = True,):
-        q, k, v = F.linear(x, self.qkv_w, self.qkv_b).chunk(3, dim=-1)
+        q, k, v = F.linear(x, self.qkv_w, self.qkv_b).chunk(
+            3, dim=-1)  # q=k=v=[1,1,512]
 
-        k_cache = torch.cat([k_cache, k], dim=1)
-        v_cache = torch.cat([v_cache, v], dim=1)
+        k_cache = torch.cat([k_cache, k], dim=1)  # [1,165+n,512] 拼接了新的k
+        v_cache = torch.cat([v_cache, v], dim=1)  # [1,165+n,512] 拼接了新的v
 
-        batch_size = q.shape[0]
-        q_len = q.shape[1]
+        batch_size = q.shape[0]  # 1
+        q_len = q.shape[1]  # 1
         kv_len = k_cache.shape[1]
 
+        # [1,self.num_head,1,512/self.num_head=32]
         q = q.view(batch_size, q_len, self.num_heads, -1).transpose(1, 2)
         k = k_cache.view(batch_size, kv_len,
-                         self.num_heads, -1).transpose(1, 2)
+                         self.num_heads, -1).transpose(1, 2)  # [1,self.num_head,165+n,32]
         v = v_cache.view(batch_size, kv_len,
-                         self.num_heads, -1).transpose(1, 2)
+                         self.num_heads, -1).transpose(1, 2)  # [1,self.num_head,165+n,32]
 
         if torch_sdpa:
             attn = F.scaled_dot_product_attention(
-                q, k, v, (~attn_mask) if attn_mask is not None else None)
+                q, k, v, (~attn_mask) if attn_mask is not None else None)  # [1,self.num_head,1,32]
         else:
             attn = scaled_dot_product_attention(q, k, v, attn_mask)
 
-        attn = attn.transpose(1, 2).reshape(batch_size, q_len, -1)
-        attn = F.linear(attn, self.out_w, self.out_b)
+        attn = attn.transpose(1, 2).reshape(batch_size, q_len, -1)  # [1,1,512]
+        attn = F.linear(attn, self.out_w, self.out_b)  # [1,1,512]
 
         x = x + attn
         x = F.layer_norm(x, [self.hidden_dim], self.norm_w1,
                          self.norm_b1, self.norm_eps1)
         x = x + self.mlp.forward(x)
         x = F.layer_norm(x, [self.hidden_dim], self.norm_w2,
-                         self.norm_b2, self.norm_eps2)
+                         self.norm_b2, self.norm_eps2)  # [1,1,512]
+        # [1,1,512], [1,165+n,512] ,[1,165+n,512] 第n次预测就加n
         return x, k_cache, v_cache
 
 
@@ -213,7 +223,8 @@ class T2STransformer:
 
     def process_prompt(
         self,
-        x: torch.Tensor,
+        x: torch.Tensor,  # 全部文本token+参考音频token, [1, T_phone+T_semantic, 512]
+        # [1, self.num_head, T_phone+T_semantic, T_phone+T_semantic]
         attn_mask: torch.Tensor,
         padding_mask: Optional[torch.Tensor] = None,
         torch_sdpa: bool = True,
@@ -222,14 +233,16 @@ class T2STransformer:
         v_cache: List[torch.Tensor] = []
         for i in range(self.num_blocks):
             x, k_cache_, v_cache_ = self.blocks[i].process_prompt(
-                x, attn_mask, padding_mask, torch_sdpa)
+                x, attn_mask, padding_mask, torch_sdpa)  # all are[1,src_len,512],
             k_cache.append(k_cache_)
             v_cache.append(v_cache_)
+        # [1,src_len,512]. k_cache and v_cache are List[1,src_len,512]
         return x, k_cache, v_cache
 
     def decode_next_token(
         self,
-        x: torch.Tensor,
+        x: torch.Tensor,  # [1,1,512], 最后一帧的音频token
+        # List[1,src_len+n,512], len=24， 第n次decode next token 就加n
         k_cache: List[torch.Tensor],
         v_cache: List[torch.Tensor],
         attn_mask: torch.Tensor = None,
@@ -800,25 +813,28 @@ class Text2SemanticDecoder(nn.Module):
 
     def infer_panel_naive(
         self,
-        x: torch.LongTensor,  # 全部文本token
-        x_lens: torch.LongTensor,
-        prompts: torch.LongTensor,  # 参考音频token
+        x: torch.LongTensor,  # 全部文本token, [1,T_phoneme=41]
+        x_lens: torch.LongTensor,  # [1]=41
+        prompts: torch.LongTensor,  # 参考音频token，来自SSL, [1,T_semantic=124]
+        # 全部文本bert feature [1,1024, T_phoneme=41]
         bert_feature: torch.LongTensor,
-        top_k: int = -100,
-        top_p: int = 100,
-        early_stop_num: int = -1,
+        top_k: int = -100,  # 20
+        top_p: int = 100,  # 1
+        early_stop_num: int = -1,  # 2700
         temperature: float = 1.0,
         repetition_penalty: float = 1.35,
         **kwargs,
     ):
-        x = self.ar_text_embedding(x)
+        x = self.ar_text_embedding(x)  # [1,T_phoneme,512]
+        # 全部文本token+bert特征
         x = x + self.bert_proj(bert_feature.transpose(1, 2))
-        x = self.ar_text_position(x)
+        x = self.ar_text_position(x)  # [1,T_phoneme,512]
 
         # AR Decoder
-        y = prompts
+        y = prompts  # 参考音频token, from ssl,[1,T_semantic=124]
 
-        x_len = x.shape[1]
+        x_len = x.shape[1]  # T_phoneme
+        # [T_phoneme,T_phoneme]
         x_attn_mask = torch.zeros((x_len, x_len), dtype=torch.bool)
         stop = False
         # print(1111111,self.num_layers)
@@ -827,11 +843,12 @@ class Text2SemanticDecoder(nn.Module):
         v_cache = None
         ###################  first step ##########################
         if y is not None:
-            y_emb = self.ar_audio_embedding(y)
-            y_len = y_emb.shape[1]
-            prefix_len = y.shape[1]
-            y_pos = self.ar_audio_position(y_emb)
-            xy_pos = torch.concat([x, y_pos], dim=1)
+            y_emb = self.ar_audio_embedding(y)  # [1,T_semantic,512]
+            y_len = y_emb.shape[1]  # T_semantic
+            prefix_len = y.shape[1]  # T_semantic
+            y_pos = self.ar_audio_position(y_emb)  # [1,T_semantic,512]
+            # [1,T_phoneme+T_semantic,512]
+            xy_pos = torch.concat([x, y_pos], dim=1)  # 全部文本token+参考音频token
             ref_free = False
         else:
             y_emb = None
@@ -848,45 +865,48 @@ class Text2SemanticDecoder(nn.Module):
             x_attn_mask,
             (0, y_len),  # xx的纯0扩展到xx纯0+xy纯1，(x,x+y)
             value=True,
-        )
+        )  # [T_phoneme, src_len]
         y_attn_mask = F.pad(  # yy的右上1扩展到左边xy的0,(y,x+y)
             torch.triu(torch.ones(y_len, y_len, dtype=torch.bool), diagonal=1),
             (x_len, 0),
             value=False,
-        )
+        )  # [T_semantic, src_len]
         xy_attn_mask = (
             torch.concat([x_attn_mask_pad, y_attn_mask], dim=0)
             .unsqueeze(0)
             .expand(bsz * self.num_head, -1, -1)
             .view(bsz, self.num_head, src_len, src_len)
             .to(device=x.device, dtype=torch.bool)
-        )
+        )  # [1,self.num_head,src_len,src_len]
 
         for idx in tqdm(range(1500)):
-            if xy_attn_mask is not None:
+            if xy_attn_mask is not None:  # 现在看来第一次走这里
                 xy_dec, k_cache, v_cache = self.t2s_transformer.process_prompt(
-                    xy_pos, xy_attn_mask, None)
-            else:
+                    xy_pos, xy_attn_mask, None)  # [1,src_len,512]. k_cache and v_cache are List[1,src_len,512]
+            else:  # 第一次以后走这里
                 xy_dec, k_cache, v_cache = self.t2s_transformer.decode_next_token(
-                    xy_pos, k_cache, v_cache)
+                    xy_pos, k_cache, v_cache)  # 等号左侧的维度[1,1,512]。k_cache and v_cache are List[1,src_len+idx,512]
 
-            logits = self.ar_predict_layer(xy_dec[:, -1])
+            logits = self.ar_predict_layer(xy_dec[:, -1])  # [1, 1025]。
 
             if idx == 0:
                 xy_attn_mask = None
             if idx < 11:  # 至少预测出10个token不然不给停止（0.4s）
-                logits = logits[:, :-1]
+                logits = logits[:, :-1]  # 去掉最后一个
 
             samples = sample(
                 logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature
-            )[0]
+            )[0]  # [1,1]
 
+            # [1,124+1=125], 将新的token拼到y最后
             y = torch.concat([y, samples], dim=1)
 
+            # 提前停止
             if early_stop_num != -1 and (y.shape[1] - prefix_len) > early_stop_num:
                 print("use early stop num:", early_stop_num)
                 stop = True
 
+            # decode出EOS就停止。
             if torch.argmax(logits, dim=-1)[0] == self.EOS or samples[0, 0] == self.EOS:
                 stop = True
             if stop:
@@ -897,10 +917,10 @@ class Text2SemanticDecoder(nn.Module):
                 break
 
             ####################### update next step ###################################
-            y_emb = self.ar_audio_embedding(y[:, -1:])
+            y_emb = self.ar_audio_embedding(y[:, -1:])  # [1,1,512]
             xy_pos = y_emb * self.ar_audio_position.x_scale + self.ar_audio_position.alpha * self.ar_audio_position.pe[
                 :, y_len + idx
-            ].to(dtype=y_emb.dtype, device=y_emb.device)
+            ].to(dtype=y_emb.dtype, device=y_emb.device)  # [1,1,512]
 
         if ref_free:
             return y[:, :-1], 0
@@ -911,7 +931,7 @@ class Text2SemanticDecoder(nn.Module):
         x: torch.LongTensor,  # 全部文本token
         x_lens: torch.LongTensor,
         prompts: torch.LongTensor,  # 参考音频token
-        bert_feature: torch.LongTensor,
+        bert_feature: torch.LongTensor,  # 全部文本bert feature
         top_k: int = -100,
         top_p: int = 100,
         early_stop_num: int = -1,

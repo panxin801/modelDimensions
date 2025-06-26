@@ -112,8 +112,10 @@ class ResidualVectorQuantizer(nn.Module):
     def decode(self, codes: torch.Tensor, st: int = 0) -> torch.Tensor:
         """Decode the given codes to the quantized representation.
         Args:
-            codes (torch.Tensor): Input indices for each quantizer.
+            codes (torch.Tensor): Input indices for each quantizer. [1,1,124]
             st (int): Start to decode input codes from which layers. Default: 0.
+        Returns:
+            [1,768,124]
         """
         quantized = self.vq.decode(codes, st=st)
         return quantized

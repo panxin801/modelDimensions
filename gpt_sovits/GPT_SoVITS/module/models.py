@@ -746,8 +746,7 @@ class CFM(nn.Module):
             xt, prompt, x_lens, t, dt, mu, use_grad_ckpt).transpose(2, 1)
         loss = 0
         for i in range(b):
-            loss += self.criterion(vt_pred[i, :, prompt_lens[i]
-                                   : x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
+            loss += self.criterion(vt_pred[i, :, prompt_lens[i]                                   : x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
         loss /= b
 
         return loss
@@ -893,31 +892,42 @@ class SynthesizerTrnV3(nn.Module):
 
     @torch.inference_mode()
     def decode_encp(self, codes, text, refer, ge=None, speed=1):
+        """
+        codes: [1,1,124]
+        text:[1,T_phoneme1=30]
+        refer:[1,1025,T_refwav=220]
+        ge is None
+        speed=1
+        """
         if ge is None:
-            refer_lengths = torch.LongTensor([refer.size(2)]).to(refer.device)
+            refer_lengths = torch.LongTensor(
+                [refer.size(2)]).to(refer.device)  # T_refwav
             refer_mask = torch.unsqueeze(commons.sequence_mask(
-                refer_lengths, refer.size(2)), 1).to(refer.dtype)
-            ge = self.ref_enc(refer[:, :704] * refer_mask, refer_mask)
-        y_lengths = torch.LongTensor([int(codes.size(2) * 2)]).to(codes.device)
+                refer_lengths, refer.size(2)), 1).to(refer.dtype)  # [1,1,T_refwav]
+            ge = self.ref_enc(refer[:, :704] * refer_mask,
+                              refer_mask)  # [1,512,1]
+        y_lengths = torch.LongTensor(
+            [int(codes.size(2) * 2)]).to(codes.device)  # [124*2]
         if speed == 1:
             sizes = int(codes.size(2) * (3.875 if self.version == "v3"else 4))
         else:
             sizee = int(codes.size(2) *
                         (3.875 if self.version == "v3"else 4) / speed) + 1
-        y_lengths1 = torch.LongTensor([sizes]).to(codes.device)
-        text_lengths = torch.LongTensor([text.size(-1)]).to(text.device)
+        y_lengths1 = torch.LongTensor([sizes]).to(codes.device)  # tensor=496
+        text_lengths = torch.LongTensor(
+            [text.size(-1)]).to(text.device)  # tensor=30
 
-        quantized = self.quantizer.decode(codes)
+        quantized = self.quantizer.decode(codes)  # [1,768,124]
         if self.semantic_frame_rate == "25hz":
             quantized = F.interpolate(
-                quantized, scale_factor=2, mode="nearest")  # BCT
+                quantized, scale_factor=2, mode="nearest")  # BCT, [1,768,124*2=248]
         x, m_p, los_p, y_mask = self.enc_p(
-            quantized, y_lengths, text, text_lengths, ge, speed)
-        fea = self.bridge(x)
+            quantized, y_lengths, text, text_lengths, ge, speed)  # [1,192,248]
+        fea = self.bridge(x)  # [1,512,248]
         fea = F.interpolate(fea, scale_factor=(
-            1.875 if self.version == "v3"else 2), mode="nearest")  # BCT
+            1.875 if self.version == "v3"else 2), mode="nearest")  # BCT,[1,512,496]
         # more wn paramter to learn mel
-        fea, y_mask_ = self.wns1(fea, y_lengths1, ge)
+        fea, y_mask_ = self.wns1(fea, y_lengths1, ge)  # [1,512,T=496]
         return fea, ge
 
     def extract_latent(self, x):
