@@ -317,86 +317,104 @@ class Text2SemanticDecoder(nn.Module):
 
     def make_input_data(self, x, x_lens, y, y_lens, bert_feature):
         # Only used when DPO activated.
-        x = self.ar_text_embedding(x)
-        x = x + self.bert_proj(bert_feature.transpose(1, 2))
-        x = self.ar_text_position(x)
-        x_mask = make_pad_mask(x_lens)
+        """
+        x: phoneme_ids: [B, T_phone]
+        x_lens: [B]
+        y: semantic_ids, from vq_model.extract_latent  [B, T_semantic], T_semantic=71
+        y_lens: [B]
+        bert_feature: bert feature from text # [B, 1024, T_phone]
+        """
 
-        y_mask = make_pad_mask(y_lens)
+        x = self.ar_text_embedding(x)  # [B,T_phone, 512]
+        # [B,T_phone, 512]
+        x = x + self.bert_proj(bert_feature.transpose(1, 2))
+        x = self.ar_text_position(x)  # [B,T_phone, 512]
+        x_mask = make_pad_mask(x_lens)  # [B,T_phone]
+        y_mask = make_pad_mask(y_lens)  # [B,T_semantic]
         y_mask_int = y_mask.type(torch.int64)
-        codes = y.type(torch.int64) * (1 - y_mask_int)
+        codes = y.type(torch.int64) * (1 - y_mask_int)  # [B,T_semantic]
 
         # Training
         # AR Decoder
+        # y, targets=[B,T_semantic]
         y, targets = self.pad_y_eos(codes, y_mask_int, eos_id=self.EOS)
-        x_len = x_lens.max()
-        y_len = y_lens.max()
-        y_emb = self.ar_audio_embedding(y)
-        y_pos = self.ar_audio_position(y_emb)
+        x_len = x_lens.max()  # T_phone
+        y_len = y_lens.max()  # T_semantic
+        y_emb = self.ar_audio_embedding(y)  # [B,T_semantic,512]
+        y_pos = self.ar_audio_position(y_emb)  # [B,T_semantic,512]
 
-        xy_padding_mask = torch.cat([x_mask, y_mask], dim=1)
+        xy_padding_mask = torch.cat(
+            [x_mask, y_mask], dim=1)  # [B,T_phone+T_semantic]
         ar_xy_padding_mask = xy_padding_mask
 
         x_attn_mask = F.pad(torch.zeros((x_len, x_len), dtype=torch.bool, device=x.device),
                             (0, y_len),
-                            value=True,)
+                            value=True,)  # [T_phone, T_phone+T_semantic]
         # x_attn_mask[:, x_len]=False
         y_attn_mask = F.pad(torch.triu(torch.ones(y_len, y_len, dtype=torch.bool, device=x.device), diagonal=1),
                             (x_len, 0),
-                            value=False,)
+                            value=False,)  # [T_semantic, T_phone+T_semantic]
+        # [T_phone+T_semantic, T_phone+T_semantic]
         xy_attn_mask = torch.concat([x_attn_mask, y_attn_mask], dim=0)
         bsz, src_len = x.shape[0], x_len + y_len
-        _xy_padding_mask = (ar_xy_padding_mask.view(
-            bsz, 1, 1, src_len).expand(-1, self.num_head, -1, -1).reshape(bsz, *self.num_head, 1, src_len))
-        xy_attn_mask = xy_attn_mask.logical_or(_xy_padding_mask)
-        nwe_attn_mask = torch.zeros_like(xy_attn_mask, dtype=x.dtype)
-        nwe_attn_mask.masked_fill_(xy_attn_mask, float("-inf"))
-        xy_attn_mask = nwe_attn_mask
+        _xy_padding_mask = (ar_xy_padding_mask.view(bsz, 1, 1, src_len)
+                            .expand(-1, self.num_head, -1, -1)
+                            .reshape(bsz * self.num_head, 1, src_len))  # [self.num_head, B, src_len]
+        xy_attn_mask = xy_attn_mask.logical_or(
+            _xy_padding_mask)  # [self.num_head, src_len, src_len]
+        new_attn_mask = torch.zeros_like(xy_attn_mask, dtype=x.dtype)
+        new_attn_mask.masked_fill_(xy_attn_mask, float("-inf"))
+        xy_attn_mask = new_attn_mask  # [self.num_head, src_len, src_len]
         # x 和完整的 y 一次性输入模型
-        xy_pos = torch.concat([x, y_pos], dim=1)
+        xy_pos = torch.concat([x, y_pos], dim=1)  # [B, src_len, 512]
 
         return xy_pos, xy_attn_mask, targets
 
     def forward(self, x, x_lens, y, y_lens, bert_feature):
         """
-        x: phoneme_ids
-        y: semantic_ids, from vq_model.extract_latent
-        bert_feature: bert feature from text
+        x: phoneme_ids: [B, T_phone]
+        x_lens: [B]
+        y: semantic_ids, from vq_model.extract_latent  [B, T_semantic], T_semantic=71
+        y_lens: [B]
+        bert_feature: bert feature from text # [B, 1024, T_phone]
         """
 
-        reject_y, reject_y_lens = make_reject_y(y, y_lens)
+        reject_y, reject_y_lens = make_reject_y(
+            y, y_lens)  # reject_y=[B,88], reject_y_lens=[B]
 
         xy_pos, xy_attn_mask, targets = self.make_input_data(
-            x, x_lens, y, y_lens, bert_feature)
+            x, x_lens, y, y_lens, bert_feature)  # xy_pos=[B,T_phone+T_semantic, 512], xy_attn_mask=[B,T_phone+T_semantic,T_phone+T_semantic], targets=[B,T_semantic]
 
         xy_dec, _ = self.h((xy_pos, None),
-                           mask=xy_attn_mask)
-        x_len = x_lens.max()
-        logits = self.ar_predict_layer(xy_dec[:, x_len:])
+                           mask=xy_attn_mask)  # [B, T_phone+T_semantic, 512]
+        x_len = x_lens.max()  # T_phone
+        logits = self.ar_predict_layer(
+            xy_dec[:, x_len:])  # [B,T_semantic, 1025]
 
         ###### DPO #############
         reject_xy_pos, reject_xy_attn_mask, reject_targets = self.make_input_data(
-            x, x_lens, reject_y, reject_y_lens, bert_feature)
+            x, x_lens, reject_y, reject_y_lens, bert_feature)  # [B,107,512], [B, 107, 107], [B,88]
 
         reject_xy_dec, _ = self.h(
             (reject_xy_pos, None),
             mask=reject_xy_attn_mask,
-        )
+        )  # [B,107,512]
         x_len = x_lens.max()
-        reject_logits = self.ar_predict_layer(reject_xy_dec[:, x_len:])
+        reject_logits = self.ar_predict_layer(
+            reject_xy_dec[:, x_len:])  # [B,88,1025]
 
         # loss
         # from feiteng: 每次 duration 越多, 梯度更新也应该更多, 所以用 sum
 
         loss_1 = F.cross_entropy(logits.permute(
-            0, 2, 1), targets, reduction="sum")
+            0, 2, 1), targets, reduction="sum")  # item
         acc = self.ar_accuracy_metric(
-            logits.permute(0, 2, 1).detach(), targets).item()
+            logits.permute(0, 2, 1).detach(), targets).item()  # item
 
         A_logits, R_logits = get_batch_logps(
-            logits, reject_logits, targets, reject_targets)
+            logits, reject_logits, targets, reject_targets)  # [1],[1]
         loss_2, _, _ = dpo_loss(A_logits, R_logits, 0,
-                                0, 0.2, reference_free=True)
+                                0, 0.2, reference_free=True)  # item
         loss = loss_1 + loss_2
 
         return loss, acc
