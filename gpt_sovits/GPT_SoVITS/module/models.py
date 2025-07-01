@@ -616,6 +616,13 @@ class SynthesizerTrn(nn.Module):
 
     @torch.no_grad()
     def decode(self, codes, text, refer, noise_scale=0.5, speed=1):
+        """
+        Args:   codes: 生成的语义特征
+                text: 目标文本的音素 ID 列表
+                refer: 包含了所有参考音频特征的列表
+                noise_scale:
+                speed: 速度
+        """
         def get_ge(refer):
             ge = None
             if refer is not None:
@@ -626,7 +633,8 @@ class SynthesizerTrn(nn.Module):
                 if self.version == "v1":
                     ge = self.ref_enc(refer * refer_mask, refer_mask)
                 else:
-                    ge = self.ref_enc(refer[:, :704] * refer_mask, refer_mask)
+                    ge = self.ref_enc(
+                        refer[:, :704] * refer_mask, refer_mask)  # 用前704
             return ge
 
         if type(refer) == list:
@@ -646,12 +654,12 @@ class SynthesizerTrn(nn.Module):
             quantized = F.interpolate(quantized, size=int(
                 quantized.shape[-1] * 2), mode="nearest")
         x, m_p, logs_p, y_mask = self.enc_p(
-            quantized, y_lengths, text, text_lengths, ge, speed)
+            quantized, y_lengths, text, text_lengths, ge, speed)  # 先验编码
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
 
-        z = self.flow(z_p, y_mask, g=ge, reverse=True)
+        z = self.flow(z_p, y_mask, g=ge, reverse=True)  # flow
 
-        o = self.dec((z * y_mask)[:, :, :], g=ge)
+        o = self.dec((z * y_mask)[:, :, :], g=ge)  # decode(vocoder)
         return o
 
     def extract_latent(self, x):
@@ -661,6 +669,9 @@ class SynthesizerTrn(nn.Module):
 
 
 class CFM(nn.Module):
+    """ Conditional Forward Model
+    """
+
     def __init__(self, in_channels, dit):
         super().__init__()
         self.estimator = dit
@@ -671,20 +682,24 @@ class CFM(nn.Module):
 
     @torch.inference_mode()
     def inference(self,
-                  mu,
+                  mu,  # 目标分布平均值，输入的是fea，它是高层的语义特征。
                   x_lens,
-                  prompt,
-                  n_timesteps,
-                  temperature=1.0,
+                  prompt,  # mel2，来自参考音频，指导生成过程。
+                  n_timesteps,  # 扩散步数
+                  temperature=1.0,  # 噪声缩放因子
                   inference_cfg_rate=0):
-        """Forward diffusion"""
+        """Forward diffusion
+        该方法用于执行前向扩散（Forward diffusion）过程。
+        前向扩散是生成扩散模型中的一个关键步骤，
+        它将噪声样本逐渐转换为目标分布（在语音合成中的目标分布可以是语音特征分布）
+        """
         B, T = mu.size(0), mu.size(1)
         x = torch.randn([B, self.in_channels, T],
-                        device=mu.device, dtype=mu.dtype) * temperature
+                        device=mu.device, dtype=mu.dtype) * temperature  # 噪声*缩放因子
         prompt_len = prompt.size(-1)
         prompt_x = torch.zeros_like(x, dtype=mu.dtype)
         prompt_x[..., :prompt_len] = prompt[..., :prompt_len]
-        x[..., :prompt_len] = 0
+        x[..., :prompt_len] = 0  # 前prompt_len个时间步置0
         mu = mu.transpose(2, 1)
         t = 0
         d = 1 / n_timesteps
@@ -746,7 +761,7 @@ class CFM(nn.Module):
             xt, prompt, x_lens, t, dt, mu, use_grad_ckpt).transpose(2, 1)
         loss = 0
         for i in range(b):
-            loss += self.criterion(vt_pred[i, :, prompt_lens[i]                                   : x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
+            loss += self.criterion(vt_pred[i, :, prompt_lens[i]: x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
         loss /= b
 
         return loss
@@ -893,13 +908,13 @@ class SynthesizerTrnV3(nn.Module):
     @torch.inference_mode()
     def decode_encp(self, codes, text, refer, ge=None, speed=1):
         """
-        codes: [1,1,124]
-        text:[1,T_phoneme1=30]
-        refer:[1,1025,T_refwav=220]
+        codes: [1,1,124]，语义特征
+        text:[1,T_phoneme1=30]，目标文本音素IDs
+        refer:[1,1025,T_refwav=220]，参考音频特征
         ge is None
         speed=1
         """
-        if ge is None:
+        if ge is None:  # 提取global embedding
             refer_lengths = torch.LongTensor(
                 [refer.size(2)]).to(refer.device)  # T_refwav
             refer_mask = torch.unsqueeze(commons.sequence_mask(
@@ -913,21 +928,24 @@ class SynthesizerTrnV3(nn.Module):
         else:
             sizee = int(codes.size(2) *
                         (3.875 if self.version == "v3"else 4) / speed) + 1
-        y_lengths1 = torch.LongTensor([sizes]).to(codes.device)  # tensor=496
+        y_lengths1 = torch.LongTensor([sizes]).to(
+            codes.device)  # tensor=496,用于wns1的时间长度
         text_lengths = torch.LongTensor(
-            [text.size(-1)]).to(text.device)  # tensor=30
+            [text.size(-1)]).to(text.device)  # tensor=30，目标文本音素ID列表的时间长度
 
-        quantized = self.quantizer.decode(codes)  # [1,768,124]
+        # [1,768,124],将AR GPT模型的codes解码为 sovits的语义特征。
+        quantized = self.quantizer.decode(codes)
         if self.semantic_frame_rate == "25hz":
             quantized = F.interpolate(
                 quantized, scale_factor=2, mode="nearest")  # BCT, [1,768,124*2=248]
         x, m_p, los_p, y_mask = self.enc_p(
-            quantized, y_lengths, text, text_lengths, ge, speed)  # [1,192,248]
-        fea = self.bridge(x)  # [1,512,248]
+            quantized, y_lengths, text, text_lengths, ge, speed)  # [1,192,248],先验编码器输出
+        fea = self.bridge(x)  # [1,512,248]，桥接层
         fea = F.interpolate(fea, scale_factor=(
             1.875 if self.version == "v3"else 2), mode="nearest")  # BCT,[1,512,496]
         # more wn paramter to learn mel
-        fea, y_mask_ = self.wns1(fea, y_lengths1, ge)  # [1,512,T=496]
+        # [1,512,T=496]，wns1是一个Encoder模块，是为了进一步处理fea，并返回。
+        fea, y_mask_ = self.wns1(fea, y_lengths1, ge)
         return fea, ge
 
     def extract_latent(self, x):

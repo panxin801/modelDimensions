@@ -227,11 +227,15 @@ class T2STransformer:
         # [1, self.num_head, T_phone+T_semantic, T_phone+T_semantic]
         attn_mask: torch.Tensor,
         padding_mask: Optional[torch.Tensor] = None,
+        # torch_sdpa 是一个布尔值，指示是否使用 PyTorch 内置的 scaled_dot_product_attention 函数
         torch_sdpa: bool = True,
     ):
+        """处理文本和参考音频提示
+        """
         k_cache: List[torch.Tensor] = []
         v_cache: List[torch.Tensor] = []
         for i in range(self.num_blocks):
+            # 循环处理每个编码器模块
             x, k_cache_, v_cache_ = self.blocks[i].process_prompt(
                 x, attn_mask, padding_mask, torch_sdpa)  # all are[1,src_len,512],
             k_cache.append(k_cache_)
@@ -249,6 +253,7 @@ class T2STransformer:
         torch_sdpa: bool = True,
     ):
         for i in range(self.num_blocks):
+            # 处理当前的token也就是x，然后返回x同时更新kv_cache
             x, k_cache[i], v_cache[i] = self.blocks[i].decode_next_token(
                 x, k_cache[i], v_cache[i], attn_mask, torch_sdpa
             )
@@ -825,30 +830,34 @@ class Text2SemanticDecoder(nn.Module):
         repetition_penalty: float = 1.35,
         **kwargs,
     ):
-        x = self.ar_text_embedding(x)  # [1,T_phoneme,512]
-        # 全部文本token+bert特征
+        x = self.ar_text_embedding(x)  # [1,T_phoneme,512],全部文本token转到嵌入向量表示
+        # 全部文本token+bert特征，融合bert特征的文本嵌入向量表示
         x = x + self.bert_proj(bert_feature.transpose(1, 2))
-        x = self.ar_text_position(x)  # [1,T_phoneme,512]
+        # [1,T_phoneme,512]。这对于自注意力机制来说是非常重要的，因为它使得模型能够理解token之间的相对顺序
+        x = self.ar_text_position(x)
 
         # AR Decoder
-        y = prompts  # 参考音频token, from ssl,[1,T_semantic=124]
+        # 参考音频token, from ssl，是通过cnhubert计算的用于引导音频语义序列的生成,[1,T_semantic=124]
+        y = prompts
 
-        x_len = x.shape[1]  # T_phoneme
-        # [T_phoneme,T_phoneme]
+        x_len = x.shape[1]  # T_phoneme，长度用于后续生成注意力掩码（attn_mask）
+        # [T_phoneme,T_phoneme]，x_attn_mask用于在自注意力机制中避免文本token之间的未来信息泄露
         x_attn_mask = torch.zeros((x_len, x_len), dtype=torch.bool)
-        stop = False
-        # print(1111111,self.num_layers)
+        stop = False  # 控制流程是否应该提前终止。
 
-        k_cache = None
+        k_cache = None  # 分别用于存储自注意力机制中的key和value的缓存
         v_cache = None
         ###################  first step ##########################
-        if y is not None:
-            y_emb = self.ar_audio_embedding(y)  # [1,T_semantic,512]
+        if y is not None:  # 有参考音频
+            # [1,T_semantic,512]，参考音频token转换到嵌入向量
+            y_emb = self.ar_audio_embedding(y)
             y_len = y_emb.shape[1]  # T_semantic
             prefix_len = y.shape[1]  # T_semantic
-            y_pos = self.ar_audio_position(y_emb)  # [1,T_semantic,512]
+            # [1,T_semantic,512]，对参考音频token嵌入向量添加位置编码，用于attention 理解token顺序。
+            y_pos = self.ar_audio_position(y_emb)
             # [1,T_phoneme+T_semantic,512]
-            xy_pos = torch.concat([x, y_pos], dim=1)  # 全部文本token+参考音频token
+            # 全部文本token嵌入向量，参考音频token嵌入向量拼接一起
+            xy_pos = torch.concat([x, y_pos], dim=1)
             ref_free = False
         else:
             y_emb = None
@@ -862,46 +871,50 @@ class Text2SemanticDecoder(nn.Module):
         bsz = x.shape[0]
         src_len = x_len + y_len
         x_attn_mask_pad = F.pad(
-            x_attn_mask,
+            x_attn_mask,  # 文本序列的注意力掩码，初始时为全0矩阵
             (0, y_len),  # xx的纯0扩展到xx纯0+xy纯1，(x,x+y)
             value=True,
-        )  # [T_phoneme, src_len]
+        )  # [T_phoneme, src_len],即在文本序列的末尾添加 y_len 列 True，使得文本序列不能看到音频序列的位置。x_attn_mask_pad是文本序列的注意力掩码
         y_attn_mask = F.pad(  # yy的右上1扩展到左边xy的0,(y,x+y)
-            torch.triu(torch.ones(y_len, y_len, dtype=torch.bool), diagonal=1),
+            torch.triu(torch.ones(y_len, y_len, dtype=torch.bool),
+                       diagonal=1),  # 上三角矩阵,上三角部分为 True，表示音频序列不能看到未来的位置
             (x_len, 0),
             value=False,
-        )  # [T_semantic, src_len]
+        )  # [T_semantic, src_len],上三角矩阵在左侧（行方向）填充 x_len 列 False，即在音频序列的开头添加 x_len 列 False，使得音频序列也不能看到文本序列的位置
         xy_attn_mask = (
             torch.concat([x_attn_mask_pad, y_attn_mask], dim=0)
             .unsqueeze(0)
             .expand(bsz * self.num_head, -1, -1)
             .view(bsz, self.num_head, src_len, src_len)
             .to(device=x.device, dtype=torch.bool)
-        )  # [1,self.num_head,src_len,src_len]
+        )  # [1,self.num_head,src_len,src_len]，组合文本和音频的注意力掩码
 
         for idx in tqdm(range(1500)):
             if xy_attn_mask is not None:  # 现在看来第一次走这里
+                # 处理文本和参考音频提示
                 xy_dec, k_cache, v_cache = self.t2s_transformer.process_prompt(
                     xy_pos, xy_attn_mask, None)  # [1,src_len,512]. k_cache and v_cache are List[1,src_len,512]
             else:  # 第一次以后走这里
+                # 解码下一个token
                 xy_dec, k_cache, v_cache = self.t2s_transformer.decode_next_token(
                     xy_pos, k_cache, v_cache)  # 等号左侧的维度[1,1,512]。k_cache and v_cache are List[1,src_len+idx,512]
 
-            logits = self.ar_predict_layer(xy_dec[:, -1])  # [1, 1025]。
+            # [1, 1025]。获取了上一步生成的文本和音频嵌入向量的最后一个时间步的输出。这里的xy_dec是前一步处理后的嵌入向量，结合了文本和音频信息。
+            logits = self.ar_predict_layer(xy_dec[:, -1])
 
             if idx == 0:
-                xy_attn_mask = None
+                xy_attn_mask = None  # 这意味着在第一次预测时，模型不会使用任何之前的注意力掩码信息。
             if idx < 11:  # 至少预测出10个token不然不给停止（0.4s）
                 logits = logits[:, :-1]  # 去掉最后一个
 
             samples = sample(
                 logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature
-            )[0]  # [1,1]
+            )[0]  # [1,1]。top_k和top_p用于控制采样的多样性，repetition_penalty用于惩罚重复生成的token，temperature用于控制生成的随机性。
 
-            # [1,124+1=125], 将新的token拼到y最后
+            # [1,124+1=125], 将新的token拼到y最后，从而更新音频语义序列。y 的形状在每次循环后都会增加1
             y = torch.concat([y, samples], dim=1)
 
-            # 提前停止
+            # 提前停止,prefix_len参考音频token的长度,即在生成之前已经存在的token数。
             if early_stop_num != -1 and (y.shape[1] - prefix_len) > early_stop_num:
                 print("use early stop num:", early_stop_num)
                 stop = True
@@ -911,16 +924,18 @@ class Text2SemanticDecoder(nn.Module):
                 stop = True
             if stop:
                 if y.shape[1] == 0:
+                    # 如果为空，则拼接一个零token
                     y = torch.concat([y, torch.zeros_like(samples)], dim=1)
                     print("bad zero prediction")
                 print(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
                 break
 
             ####################### update next step ###################################
-            y_emb = self.ar_audio_embedding(y[:, -1:])  # [1,1,512]
+            # [1,1,512],从y中提取最后一个token计算嵌入向量。
+            y_emb = self.ar_audio_embedding(y[:, -1:])
             xy_pos = y_emb * self.ar_audio_position.x_scale + self.ar_audio_position.alpha * self.ar_audio_position.pe[
-                :, y_len + idx
-            ].to(dtype=y_emb.dtype, device=y_emb.device)  # [1,1,512]
+                :, y_len + idx  # 缩放+位置编码权重*预计算好的位置编码矩阵（pe，postition encoding）
+            ].to(dtype=y_emb.dtype, device=y_emb.device)  # [1,1,512]。这一步是为了让模型理解新生成的token在序列中的位置。
 
         if ref_free:
             return y[:, :-1], 0
