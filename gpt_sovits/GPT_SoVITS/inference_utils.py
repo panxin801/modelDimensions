@@ -750,7 +750,7 @@ def get_tts_wav(
                 pred_semantic, idx = t2s_model.model.infer_panel(
                     all_phoneme_ids,  # 全部音素token包含了全部音素token的张量
                     all_phoneme_len,
-                    None if ref_free else prompt,  # 参考音频SSL
+                    None if ref_free else prompt,  # 参考音频SSL,过SoVITS计算得到的语义编码
                     bert,  # 全部文本Bert
                     top_k=top_k,
                     top_p=top_p,
@@ -786,7 +786,7 @@ def get_tts_wav(
             phoneme_ids1 = torch.LongTensor(phones2).to(
                 device).unsqueeze(0)  # [1, T_phoneme2]
             fea_ref, ge = vq_model.decode_encp(
-                prompt.unsqueeze(0), phoneme_ids0, refer)  # [1,512,T=496],[1,512,1],prompt是参考音频的ssl，refer是参考音频的特征
+                prompt.unsqueeze(0), phoneme_ids0, refer)  # [1,512,T=496],[1,512,1],prompt是参考音频的ssl过SoVITS的latent code，refer是参考音频的特征
             ref_audio, sr = torchaudio.load(ref_wav_path)
             ref_audio = ref_audio.to(device).float()
             if ref_audio.size(0) == 2:
