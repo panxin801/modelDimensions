@@ -6,6 +6,7 @@ import traceback
 import torchaudio
 import re
 import numpy as np
+# parameter efficient fine tunget_peft_modeling
 from peft import (LoraConfig, get_peft_model)
 from time import time as ttime
 from transformers import (AutoModelForMaskedLM, AutoTokenizer)
@@ -594,6 +595,7 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
         print(f"Loading sovits_{model_version}pretrained_G", vq_model.load_state_dict(
             load_sovits_new(path_sovits)["weight"], strict=False))
         lora_rank = dict_s2["lora_rank"]
+        # W_lora=W_orig+(alpha/r)*delt_w
         lora_confg = LoraConfig(target_modules=["to_k", "to_q", "to_v", "to_out.0"],
                                 r=lora_rank,
                                 lora_alpha=lora_rank,

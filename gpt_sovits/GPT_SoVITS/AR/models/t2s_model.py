@@ -895,9 +895,9 @@ class Text2SemanticDecoder(nn.Module):
                 xy_dec, k_cache, v_cache = self.t2s_transformer.process_prompt(
                     xy_pos, xy_attn_mask, None)  # [1,src_len,512]. k_cache and v_cache are List[1,src_len,512]
             else:  # 第一次以后走这里
-                # 解码下一个token
+                # 解码下一个token,k{v}_cache是缓存
                 xy_dec, k_cache, v_cache = self.t2s_transformer.decode_next_token(
-                    xy_pos, k_cache, v_cache)  # 等号左侧的维度[1,1,512]。k_cache and v_cache are List[1,src_len+idx,512]
+                    xy_pos, k_cache, v_cache)  # 等号左侧的维度[1,1,512]。k_cache and v_cache are List[1,src_len+idx,512], 典型的LLM的decoder-only的形式
 
             # [1, 1025]。获取了上一步生成的文本和音频嵌入向量的最后一个时间步的输出。这里的xy_dec是前一步处理后的嵌入向量，结合了文本和音频信息。
             logits = self.ar_predict_layer(xy_dec[:, -1])
