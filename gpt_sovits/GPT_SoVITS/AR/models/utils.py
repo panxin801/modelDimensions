@@ -161,6 +161,12 @@ def logits_to_probs(
     #     previous_tokens = previous_tokens.squeeze()
     # print(logits.shape,previous_tokens.shape)
     # pdb.set_trace()
+
+    # 检查是否提供了 previous_tokens 和 repetition_penalty 是否不为 1.0。
+    # torch.gather 用于从 logits 中根据 previous_tokens 提取对应的分数。
+    # 根据分数的正负，应用不同的惩罚方式：负分数乘以 repetition_penalty，正分数除以 repetition_penalty。
+    # logits.scatter_ 将惩罚后的分数放回 logits 中相应的位置。
+
     if previous_tokens is not None and repetition_penalty != 1.0:
         previous_tokens = previous_tokens.long()
         score = torch.gather(logits, dim=1, index=previous_tokens)
@@ -171,6 +177,12 @@ def logits_to_probs(
         )
         logits.scatter_(dim=1, index=previous_tokens, src=score)
 
+    # 检查是否提供了 top_p 并且 top_p 是否小于 1.0。
+    # torch.sort 对 logits 进行降序排序，得到排序后的 logits 和对应的索引 sorted_indices。
+    # torch.nn.functional.softmax 将 sorted_logits 转换为概率分布，torch.cumsum 计算累积概率。
+    # 根据累积概率与 top_p 的比较，生成需要移除的索引 sorted_indices_to_remove，并确保至少保留一个选项。
+    # 将 sorted_indices_to_remove 散射到原始的索引位置 indices_to_remove。
+    # 使用 logits.masked_fill 将需要移除的索引对应的 logits 值设为负无穷，这样在接下来的 softmax 操作中，这些位置的概率将接近 0。
     if top_p is not None and top_p < 1.0:
         sorted_logits, sorted_indices = torch.sort(logits, descending=True)
         cum_probs = torch.cumsum(
@@ -184,8 +196,16 @@ def logits_to_probs(
         )
         logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+    # 调整 logits 的温度，温度越高，生成的词越随机。此处使用 max(temperature, 1e-5) 防止温度为 0 或负数导致的错误。
+    # 操作确实不会改变元素的相对大小顺序，但会改变它们的绝对值大小，从而影响生成词的随机性。
+    # 当 temperature 值较高时，logits 的值会被缩小，使得概率分布更加平滑。这意味着生成词的选择会更加随机，所有词的概率差异会被减小。
+    # 当 temperature 值较低时，logits 的值会被放大，使得概率分布更加集中。这意味着生成词的选择会更加确定，高概率的词的概率会进一步提高，低概率的词的概率会进一步降低。
     logits = logits / max(temperature, 1e-5)
 
+    # 检查是否提供了 top_k。
+    # torch.topk 保留 logits 中概率最高的 top_k 个词。
+    # pivot 是 logits 中第 top_k 高的分数。
+    # 使用 torch.where 将低于 pivot 的分数设为负无穷，确保只有前 top_k 个词具有非零概率。
     if top_k is not None:
         v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
         pivot = v[:, -1].unsqueeze(-1)
