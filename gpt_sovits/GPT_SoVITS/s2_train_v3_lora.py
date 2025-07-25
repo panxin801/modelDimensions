@@ -110,11 +110,12 @@ def run(rank, n_gpus, hps):
     os.makedirs(save_root, exist_ok=True)
     lora_rank = int(hps.train.lora_rank)
     lora_config = LoraConfig(
-        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        target_modules=["to_k", "to_q", "to_v",
+                        "to_out.0"],  # 在DiT的Attention中，这些层用lora
         r=lora_rank,
-        lora_alpha=lora_rank,
+        lora_alpha=lora_rank,  # 一般设置为2*lora_rank
         init_lora_weights=True,
-    )
+    )  # 定义lora 配置
 
     def get_model(hps):
         return SynthesizerTrn(
@@ -142,6 +143,7 @@ def run(rank, n_gpus, hps):
 
     try:  # 如果能加载自动resume
         net_g = get_model(hps)
+        # 得到带了lora配置的peft模型，很多模型参数的requires_grad都为False,可以用param.numel和requires_grad组合起来一起看。
         net_g.cfm = get_peft_model(net_g.cfm, lora_config)
         net_g = model2cuda(net_g, rank)
         optim_g = get_optim(net_g)
