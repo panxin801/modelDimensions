@@ -149,6 +149,7 @@ def train(rank, args, checkpoint_path, hp, hp_str):
     # if not consistent, it'll horribly slow down.
     torch.backends.cudnn.benchmark = True
 
+    # 定义生成模型和判别模型的各自学习率调整策略
     scheduler_g = optim.lr_scheduler.ExponentialLR(
         optim_g, gamma=hp.train.lr_decay, last_epoch=init_epoch - 2)
     scheduler_d = optim.lr_scheduler.ExponentialLR(
@@ -199,24 +200,26 @@ def train(rank, args, checkpoint_path, hp, hp_str):
             spk_loss = spkc_criterion(spk, spk_preds, torch.Tensor(spk_preds.size(0))
                                       .to(device).fill_(1.0))  # fill_(1.0)相当于cos_embedding_loss 中y=1的情况
             # Mel Loss
-            mel_fake = stft.mel_spectrogram(fake_audio.squeeze(1))
-            mel_real = stft.mel_spectrogram(audio.squeeze(1))
+            mel_fake = stft.mel_spectrogram(fake_audio.squeeze(1))  # 生成音频的mel谱
+            mel_real = stft.mel_spectrogram(audio.squeeze(1))  # 真实音频的mel谱
             mel_loss = F.l1_loss(mel_fake, mel_real) * hp.train.c_mel
 
             # Multi-Resolution STFT Loss
+            # sc_loss  频谱收敛损失      是  torch.norm(y_mag - x_mag, p="fro") / torch.norm(y_mag, p="fro")
+            # mag_loss Log 频谱的放大损失 是  F.l1_loss(torch.log(y_mag), torch.log(x_mag))
             sc_loss, mag_loss = stft_criterion(
                 fake_audio.squeeze(1), audio.squeeze(1))
             stft_loss = (sc_loss + mag_loss) * hp.train.c_stft
 
             # Generator Loss
-            disc_fake = model_d(fake_audio)
+            disc_fake = model_d(fake_audio)  # 判别器鉴别生成的音频，结果应该是false
             score_loss = 0.0
             for (_, score_fake) in disc_fake:
                 score_loss += torch.mean(torch.pow(score_fake - 1.0, 2))
             score_loss = score_loss / len(disc_fake)
 
             # Feature Loss
-            disc_real = model_d(audio)
+            disc_real = model_d(audio)  # 判别器鉴别真实的音频，结果应该是true
             feat_loss = 0.0
             for (feat_fake, _), (feat_real, _) in zip(disc_fake, disc_real):
                 for fake, real in zip(feat_fake, feat_real):
@@ -226,9 +229,9 @@ def train(rank, args, checkpoint_path, hp, hp_str):
 
             # Kl Loss
             loss_kl_f = kl_loss(z_f, logs_q, m_p, logs_p,
-                                logdet_f, z_mask) * hp.train.c_kl  # q||p
+                                logdet_f, z_mask) * hp.train.c_kl  # p 和 q 分布的KL散度 z_f 是 将后验编码器的z_q 经过flow生成 z_f
             loss_kl_r = kl_loss(z_r, logs_p, m_q, logs_q,
-                                logdet_r, z_mask) * hp.train.c_kl  # p||q
+                                logdet_r, z_mask) * hp.train.c_kl  # q 和 p 分布的KL散度 z_r 是 将先验编码器的z_p 经过反向flow生成 z_r
 
             # Loss
             loss_g = score_loss + feat_loss + mel_loss + \

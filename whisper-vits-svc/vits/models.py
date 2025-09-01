@@ -143,8 +143,9 @@ class SynthesizerTrn(nn.Module):
             hp
     ):
         super().__init__()
-        self.segment_size = segment_size
+        self.segment_size = segment_size  # segment_size /hop_size=8000/320=25
         self.emb_g = nn.Linear(hp.vits.spk_dim, hp.vits.gin_channels)
+        # enc_p 是先验编码器，提取语音中和说话人无关的信息
         self.enc_p = TextEncoder(
             hp.vits.ppg_dim,
             hp.vits.vec_dim,
@@ -160,13 +161,14 @@ class SynthesizerTrn(nn.Module):
             hp.vits.hidden_channels,
             hp.vits.spk_dim,
         )
+        # enc_q 是后验编码器，提取说话人声纹特征概率分布。
         self.enc_q = PosteriorEncoder(
             spec_channels,
             hp.vits.inter_channels,
             hp.vits.hidden_channels,
             5,
-            1,
-            16,
+            1,  # wavenet中空洞卷积的大小
+            16,  # wavnet中的层数
             gin_channels=hp.vits.gin_channels,
         )
         self.flow = ResidualCouplingBlock(
@@ -183,10 +185,10 @@ class SynthesizerTrn(nn.Module):
         ppg = ppg + torch.randn_like(ppg) * 1  # Perturbation
         # Perturbation, vec来自hubert是一个多层纯卷积的结构，不确定性会更大一点点。
         vec = vec + torch.randn_like(vec) * 2
-        g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
+        g = self.emb_g(F.normalize(spk)).unsqueeze(-1)  # 基频离散化后做embedding
         z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
-            ppg, ppg_l, vec, f0=f0_to_coarse(pit))
-        z_q, m_q, logs_q, spec_mask = self.enc_q(spec, spec_l, g=g)
+            ppg, ppg_l, vec, f0=f0_to_coarse(pit))  # 形成先验分布
+        z_q, m_q, logs_q, spec_mask = self.enc_q(spec, spec_l, g=g)  # 形成后验分布
 
         z_slice, pit_slice, ids_slice = commons.rand_slice_segments_with_pitch(
             z_q, pit, spec_l, self.segment_size)
@@ -203,9 +205,11 @@ class SynthesizerTrn(nn.Module):
 
     def infer(self, ppg, vec, pit, spk, ppg_l):
         ppg = ppg + torch.randn_like(ppg) * 0.0001  # Perturbation
-        z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
+        z_p, m_p, logs_p, ppg_mask, x = self.enc_p(  # 讲音频中的文本信息（ppg）经过先验编码器生成z_p
             ppg, ppg_l, vec, f0=f0_to_coarse(pit))
+        # 通过反向flow将z_p转为z
         z, _ = self.flow(z_p, ppg_mask, g=spk, reverse=True)
+        # 通过语音解码器生成波形
         o = self.dec(spk, z * ppg_mask, f0=pit)
         return o
 
