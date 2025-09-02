@@ -22,10 +22,10 @@ class TextEncoder(nn.Module):
         super().__init__()
         self.out_channels = out_channels
         self.pre = nn.Conv1d(in_channels, hidden_channels,
-                             kernel_size=5, padding=2)
+                             kernel_size=5, padding=2)  # ppg经过的conv1d
         self.hub = nn.Conv1d(vec_channels, hidden_channels,
-                             kernel_size=5, padding=2)
-        self.pit = nn.Embedding(256, hidden_channels)
+                             kernel_size=5, padding=2)  # vec经过俄conv1d
+        self.pit = nn.Embedding(256, hidden_channels)  # pit经过的离散embedding
         self.enc = attentions.Encoder(hidden_channels,
                                       filter_channels,
                                       n_heads,
@@ -38,15 +38,17 @@ class TextEncoder(nn.Module):
         x = torch.transpose(x, 1, -1)  # [b, h, t]
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
             x.dtype
-        )  # x_mask是将超出数据本身length的部分值置为False，然后和原始的值相乘不影响计算结果。
+        )  # x_mask是将超出数据本身length的部分值置为False，然后和原始的值相乘不影响计算结果，掩码false的为0
         x = self.pre(x) * x_mask
         v = torch.transpose(v, 1, -1)  # [b, h, t]
         v = self.hub(v) * x_mask
-        x = x + v + self.pit(f0).transpose(1, 2)
-        x = self.enc(x * x_mask, x_mask)
+        x = x + v + self.pit(f0).transpose(1, 2)  # ppg+vec+pit
+        x = self.enc(x * x_mask, x_mask)  # 放入编码器中
         stats = self.proj(x) * x_mask
-        m, logs = torch.split(stats, self.out_channels, dim=1)
-        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask  # sampling
+        m, logs = torch.split(stats, self.out_channels,
+                              dim=1)  # stats拆分为mean和log_std
+        z = (m + torch.randn_like(m) * torch.exp(logs)) * \
+            x_mask  # sampling， 通过均值和方差生成先验编码分布z，维度z和m一样
         return z, m, logs, x_mask, x
 
 
