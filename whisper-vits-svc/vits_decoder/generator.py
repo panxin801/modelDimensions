@@ -37,12 +37,13 @@ class SpeakerAdapter(nn.Module):
         y: [B, D, T], D=192
         """
         x = x.transpose(1, -1)
-        mean = x.mean(dim=-1, keepdim=True)
-        var = ((x - mean)**2).mean(dim=-1, keepdim=True)
-        std = (var + self.epsilon).sqrt()
+        mean = x.mean(dim=-1, keepdim=True)  # 得到均值
+        var = ((x - mean)**2).mean(dim=-1, keepdim=True)  # 得到方差
+        std = (var + self.epsilon).sqrt()  # 加上epsilon防止除零
         y = (x - mean) / std
         scale = self.W_scale(speaker_embedding)
         bias = self.W_bias(speaker_embedding)
+        # y*scale+bias
         y *= scale.unsqueeze(1)
         y += bias.unsqueeze(1)
         y = y.transpose(1, -1)

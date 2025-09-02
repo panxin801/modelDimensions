@@ -207,16 +207,16 @@ class SineGen(torch.nn.Module):
         flag_for_pulse=False,
     ):
         super(SineGen, self).__init__()
-        self.sine_amp = sine_amp
-        self.noise_std = noise_std
-        self.harmonic_num = harmonic_num
-        self.dim = self.harmonic_num + 1
-        self.sampling_rate = samp_rate
-        self.voiced_threshold = voiced_threshold
-        self.flag_for_pulse = flag_for_pulse
+        self.sine_amp = sine_amp  # sin波形的振幅
+        self.noise_std = noise_std  # 高斯噪声标准差
+        self.harmonic_num = harmonic_num  # 谐波数量
+        self.dim = self.harmonic_num + 1  # 基波+谐波数量
+        self.sampling_rate = samp_rate  # 采样率hz
+        self.voiced_threshold = voiced_threshold  # F0阈值，用于做清音和浊音的分类
+        self.flag_for_pulse = flag_for_pulse  # 是否PulseGen
 
     def _f02uv(self, f0):
-        # generate uv signal
+        # generate uv signal，根据阈值 voiced_threshold 给出基频 浊音voice 或者 清音unvoice 的判断
         uv = torch.ones_like(f0)
         uv = uv * (f0 > self.voiced_threshold)
         return uv
@@ -229,10 +229,12 @@ class SineGen(torch.nn.Module):
         # because 2 * np.pi * n doesn't affect phase
         rad_values = (f0_values / self.sampling_rate) % 1
 
-        # initial phase noise (no noise for fundamental component)
+        # initial phase noise (no noise for fundamental component)。初始化一个随机高斯变量作为随机初始相位 \phi
+        # 每一个倍频有自己的初始随机 、phi
         rand_ini = torch.rand(
             f0_values.shape[0], f0_values.shape[2], device=f0_values.device
         )
+        # 初始相位，即 sin(phase + phi) 中的 phase + phi
         rand_ini[:, 0] = 0
         rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
 
@@ -244,12 +246,19 @@ class SineGen(torch.nn.Module):
             # it is necessary to add -1 whenever \sum_k=1^n rad_value_k > 1.
             # Buffer tmp_over_one_idx indicates the time step to add -1.
             # This will not change F0 of sine because (x-1) * 2*pi = x * 2*pi
+
+            # tmp_over_one 为 公式中 t 时刻的 fk/Ns 求和
+            # 在 rad_values 是对应 t 时刻
+            # 在 tmp_over_one 是对前 t 时刻的累加，再对 1 求余
             tmp_over_one = torch.cumsum(rad_values, 1) % 1
+
+            # 这里要判断是否是递减的，如果存在递减则需要取反
             tmp_over_one_idx = (
                 tmp_over_one[:, 1:, :] - tmp_over_one[:, :-1, :]) < 0
             cumsum_shift = torch.zeros_like(rad_values)
             cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
 
+            # 这里是计算 sin( sum(fk/Ns)*2*pi + phi)
             sines = torch.sin(
                 torch.cumsum(rad_values + cumsum_shift, dim=1) * 2 * np.pi
             )
@@ -293,13 +302,13 @@ class SineGen(torch.nn.Module):
         with torch.no_grad():
             f0_buf = torch.zeros(
                 f0.shape[0], f0.shape[1], self.dim, device=f0.device)
-            # fundamental component
+            # fundamental component，第 0 位置是基频赋值
             f0_buf[:, :, 0] = f0[:, :, 0]
             for idx in np.arange(self.harmonic_num):
                 # idx + 2: the (idx+1)-th overtone, (idx+2)-th harmonic
                 f0_buf[:, :, idx + 1] = f0_buf[:, :, 0] * (idx + 2)
 
-            # generate sine waveforms
+            # generate sine waveforms，乘sin幅值
             sine_waves = self._f02sine(f0_buf) * self.sine_amp
 
             # generate uv signal
@@ -310,6 +319,7 @@ class SineGen(torch.nn.Module):
             # noise: for unvoiced should be similar to sine_amp
             #        std = self.sine_amp/3 -> max value ~ self.sine_amp
             # .       for voiced regions is self.noise_std
+            # 如果基频是 0 ，则根据文献此处输出为 （alpha/3*sigma ）*nt，是一个小随机噪声
             noise_amp = uv * self.noise_std + (1 - uv) * self.sine_amp / 3
             noise = noise_amp * torch.randn_like(sine_waves)
 
