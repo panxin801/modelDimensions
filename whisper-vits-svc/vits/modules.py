@@ -137,9 +137,9 @@ class WN(torch.nn.Module):
         assert kernel_size % 2 == 1
         self.hidden_channels = hidden_channels
         self.kernel_size = (kernel_size,)
-        self.dilation_rate = dilation_rate
-        self.n_layers = n_layers
-        self.gin_channels = gin_channels
+        self.dilation_rate = dilation_rate  # 每一层空洞卷积的空洞大小
+        self.n_layers = n_layers  # wavnet层数
+        self.gin_channels = gin_channels  # 说话人embedding输入
         self.p_dropout = p_dropout
 
         self.in_layers = torch.nn.ModuleList()
@@ -154,7 +154,7 @@ class WN(torch.nn.Module):
                 cond_layer, name="weight")
 
         for i in range(n_layers):
-            dilation = dilation_rate**i
+            dilation = dilation_rate**i  # 每一层空洞卷积的空洞大小为dilation_rate的i次方
             padding = int((kernel_size * dilation - dilation) / 2)
             in_layer = torch.nn.Conv1d(
                 hidden_channels,
@@ -164,7 +164,7 @@ class WN(torch.nn.Module):
                 padding=padding,
             )
             in_layer = torch.nn.utils.weight_norm(in_layer, name="weight")
-            self.in_layers.append(in_layer)
+            self.in_layers.append(in_layer)  # 空洞卷积+权重归一化
 
             # last one is not necessary
             if i < n_layers - 1:
@@ -192,8 +192,13 @@ class WN(torch.nn.Module):
                 g_l = g[:, cond_offset: cond_offset +
                         2 * self.hidden_channels, :]
             else:
+                # 不考虑说话人embedding输入
                 g_l = torch.zeros_like(x_in)
 
+            # 这里在 fused_add_tanh_sigmoid_multiply 中做如下操作：
+            # 1、将 x_in + g_l 相加
+            # 2、将相加后的输出分别通过 tanh 和 sigmoid
+            # 3、将 tanh 和 sigmoid 的输出再相乘
             acts = commons.fused_add_tanh_sigmoid_multiply(
                 x_in, g_l, n_channels_tensor)
             acts = self.drop(acts)
@@ -204,6 +209,7 @@ class WN(torch.nn.Module):
                 x = (x + res_acts) * x_mask
                 output = output + res_skip_acts[:, self.hidden_channels:, :]
             else:
+                # 如果不是最后一层则需要加上输入 x ,即做一个残差
                 output = output + res_skip_acts
         return output * x_mask
 
