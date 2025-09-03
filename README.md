@@ -7,6 +7,8 @@ HIFI-GAN: Non-autoregressive vocoder
 
 Gpt-Sovits: Few-shot Voice conversion and TTS system
 
+emotional-vits: Emotional vits model
+
 
 ## Details
 - vits_chinese: https://github.com/wac81/vits_chinese
@@ -19,4 +21,5 @@ Gpt-Sovits: Few-shot Voice conversion and TTS system
 - bert_vits2: https://github.com/fishaudio/Bert-VITS2
     - vits2: https://github.com/p0p4k/vits2_pytorch/tree/main
 - gpt_sovits: https://github.com/RVC-Boss/GPT-SoVITS
+- emotional_vits: https://github.com/innnky/emotional-vits
 
