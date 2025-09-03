@@ -257,6 +257,9 @@ class VectorQuantization(nn.Module):
             randomly selected vector from the current batch.
         commitment_weight (float): Weight for commitment loss.
     """
+    """在进行量化编码时，其编码字典的实现为Euclideanbook。
+        其将输入数据做k均值聚类实现一个编码器，将k均值的中心点，作为量化字典。
+    """
 
     def __init__(
         self,
@@ -370,11 +373,11 @@ class ResidualVectorQuantization(nn.Module):
 
         for i, layer in enumerate(self.layers[:n_q]):
             quantized, indices, loss = layer(residual)
-            # quantized=[B,D,F]
-            # indices=[B,F]
-            # loss=[1]
-            residual = residual - quantized
-            quantized_out = quantized_out + quantized
+            # quantized=[B,D,F]， 量化后的特征
+            # indices=[B,F]， 量化后的特征对应的索引
+            # loss=[1]， 量化后的特征向量和原始特征的损失
+            residual = residual - quantized  # 残差
+            quantized_out = quantized_out + quantized  # 基于量化输出的总体累加输出
 
             all_indices.append(indices)
             all_losses.append(loss)
