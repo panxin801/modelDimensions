@@ -669,7 +669,7 @@ class SynthesizerTrn(nn.Module):
 
 
 class CFM(nn.Module):
-    """ Conditional Forward Model
+    """ s2结构变更为：shortcut Conditional Flow Matching Diffusion Transformers (shortcut-CFM-DiT)
     """
 
     def __init__(self, in_channels, dit):
@@ -761,7 +761,8 @@ class CFM(nn.Module):
             xt, prompt, x_lens, t, dt, mu, use_grad_ckpt).transpose(2, 1)
         loss = 0
         for i in range(b):
-            loss += self.criterion(vt_pred[i, :, prompt_lens[i]: x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
+            loss += self.criterion(vt_pred[i, :, prompt_lens[i]
+                                   : x_lens[i]], vt[i, :, prompt_lens[i]: x_lens[i]])
         loss /= b
 
         return loss
@@ -894,6 +895,7 @@ class SynthesizerTrnV3(nn.Module):
         fea = F.interpolate(fea, scale_factor=(
             1.875 if self.version == "v3" else 2), mode="nearest")  # BCT
         # If the 1-minute fine-tuning works fine, no need to manually adjust the learning rate.
+        # wns1在sovits中是posterior中的东西
         fea, y_mask_ = self.wns1(fea, mel_lengths, ge)
         B = ssl.size(0)
         prompt_len_max = mel_lengths * 2 / 3
@@ -902,7 +904,8 @@ class SynthesizerTrnV3(nn.Module):
         minn = min(mel.size(-1), fea.size(-1))
         mel = mel[:, :, :minn]
         fea = fea[:, :, :minn]
-        cfm_loss = self.cfm(mel, mel_lengths, prompt_len, fea, use_grad_ckpt)
+        cfm_loss = self.cfm(mel, mel_lengths, prompt_len,
+                            fea, use_grad_ckpt)  # 这cfm相当于生成器/后验编码器的意思吗？
         return cfm_loss
 
     @torch.inference_mode()
