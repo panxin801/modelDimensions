@@ -1,0 +1,7 @@
+.vscode
+__pycache__
+*.bin
+*.scp
+*.ark
+wav2vec2-xlsr-53-espeak-cv-ft
+vctkDataset

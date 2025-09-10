@@ -28,10 +28,15 @@ emotional-vits: Emotional vits model
 - whisper-vits-svc: https://github.com/PlayVoice/whisper-vits-svc/tree/bigvgan-mix-v2
 
 - bert_vits2: https://github.com/fishaudio/Bert-VITS2
-    
+  
     - vits2: https://github.com/p0p4k/vits2_pytorch/tree/main
     
 - gpt_sovits: https://github.com/RVC-Boss/GPT-SoVITS
 
 - emotional_vits: https://github.com/innnky/emotional-vits
+
+- NT_GPT_TTS(unoffical implementation): https://github.com/scutcsq/Neural-Transducers-for-Two-Stage-Text-to-Speech-via-Semantic-Token-Prediction?tab=readme-ov-file
+    - paper: https://arxiv.org/pdf/2401.01498 
+
+    Using wav2vec2 and K-Means extract discrete token as stage1,  put into vits architecture acoustic as stage2, pipeline similar to GPT_VITS
 
