@@ -37,3 +37,10 @@ python train_KMeans.py
 ```
 python extract_tokens.py
 ```
+
+## Step 5: generate g2p from words to phonemes
+
+```python
+python run_g2p.py
+```
+

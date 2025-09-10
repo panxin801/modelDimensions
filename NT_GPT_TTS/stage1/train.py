@@ -1,27 +1,20 @@
-import os
-import sys
 import argparse
-import json
+import os
 import torch
-import torch.distributed as dist
 import torch.multiprocessing as mp
+import torch.distributed as dist
 import torch.nn as nn
-import numpy as np
-from warnings import simplefilter
-from tqdm import tqdm
-
+import json
+import warnings
 
 from utils import Hparams
+from dataset import (TransducerDataset, TransducerCollate)
 
-simplefilter(action="ignore", category=FutureWarning)
-simplefilter(action="ignore", category=UserWarning)
-
-
-def train(rank, args, hparams):
-    ...
+warnings.simplefilter(action="ignore", category=FutureWarning)
+warnings.simplefilter(action="ignore", category=UserWarning)
 
 
-if __name__ == "__main__":
+def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--checkpoint-path", type=str, default=None)
@@ -30,32 +23,57 @@ if __name__ == "__main__":
     parser.add_argument("--mel-scp", type=str, default="mel16k.scp")
     parser.add_argument("--token-scp", type=str, default="token.scp")
     parser.add_argument("--load-iteration", type=bool, default=True)
-    parser.add_argument("--output-directory", type=str, default="stagemodel")
-    parser.add_argument("--config", type=str, default="libritts_config.yaml")
+    parser.add_argument("--output-directory", type=str, default="stage1model")
+    parser.add_argument("--config-path", type=str, default="vctk_config.json")
 
     args = parser.parse_args()
+    return args
 
-    with open(args.config, "rt", encoding="utf8") as fr:
+
+def train(rank, args, hparams):
+    os.makedirs(args.output_directory, exist_ok=True)
+
+    # init dist training
+    if args.num_gpus > 1:
+        print(f"Init distributed training on rank {rank}")
+
+        os.environ["MASTER_ADDR"] = hparams.dist_url
+        os.environ["MASTER_PORT"] = hparams.dist_port
+
+        dist.init_process_group(backend=hparams.dist_backend,
+                                init_method="env://",
+                                world_size=hparams.dist_world_size * args.num_gpus,
+                                rank=rank)
+        print(f"Initialized process group for rank {rank} successfully")
+
+    torch.cuda.set_device(rank)
+
+    # Load datasets
+
+
+if __name__ == "__main__":
+    args = get_args()
+
+    with open(args.config_path, "rt", encoding="utf8") as fr:
         data = fr.read()
     config = json.loads(data)
     hparams = Hparams(**config)
 
-    torch.backends.cudnn.cudnn_enabled = hparams.cudnn_enabled
+    torch.backends.cudnn.enabled = hparams.cudnn_enabled
     torch.backends.cudnn.benchmark = hparams.cudnn_benchmark
-    torch.backends.cudnn.deterministic = hparams.cudnn_deterministic
+    torch.backends.cudnn.cudnn_deterministic = hparams.cudnn_deterministic
 
     if torch.cuda.is_available():
         torch.cuda.manual_seed(hparams.seed)
         torch.cuda.manual_seed_all(hparams.seed)
-        torch.random.manual_seed(hparams.seed)
-        np.random.seed(hparams.seed)
 
         args.num_gpus = torch.cuda.device_count()
-        print("Number of GPUs:", args.num_gpus)
         args.batch_size = int(hparams.batch_size / args.num_gpus)
-        print("Batch size per GPU:", args.batch_size)
+        print(
+            f"Using {args.num_gpus} GPUs, batch size per GPU: {args.batch_size}")
+    else:
+        print(f"Using CPU, batch size: {hparams.batch_size}")
 
-    os.makedirs(os.path.join(args.output_directory, "ckpt"), exist_ok=True)
     if args.num_gpus > 1:
         mp.spawn(train, nprocs=args.num_gpus, args=(args, hparams))
     else:

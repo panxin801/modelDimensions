@@ -3,8 +3,8 @@
   "saved_checkpoint": 10000,
   "evaluate_epoch": 5000,
   "dist_backend": "nccl",
-  "dist_url": "xxx.xxx.xxx.xxx",
-  "dist_port": "11348",
+  "dist_url": "localhost",
+  "dist_port": "62221",
   "dist_world_size": 1,
   "cudnn_enabled": true,
   "cudnn_benchmark": true,
@@ -14,5 +14,6 @@
   "lr_decay": 0.999,
   "batch_size": 64,
   "use_fp16": false,
-  "seed": 1046
+  "seed": 1046,
+  "segment_size": 187,
 }
