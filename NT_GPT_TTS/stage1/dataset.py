@@ -46,7 +46,8 @@ class TransducerDataset(data.Dataset):
                 # print(featList)
 
                 tempList.append(uttid)
-                tempList.append([phone_to_idx[phone] for phone in featList])
+                tempList.append([phone_to_idx[phone]
+                                for phone in featList])  # phoneme to int index
 
                 metaList.append(tempList)
 
@@ -56,10 +57,10 @@ class TransducerDataset(data.Dataset):
         return len(self.metaList)
 
     def __getitem__(self, index):
-        uttid, phones = self.metaList[index]
+        uttid, phones = self.metaList[index]  # phoines are int list
 
         tokenSeq = torch.from_numpy(self.tokenDict[uttid])  # [L_token]
-        phoneIds = torch.LongTensor(phones)
+        phoneIds = torch.LongTensor(phones)  # [L_phone]
 
         mels = torch.from_numpy(self.melDict[uttid])  # [L_mels, 80]
         melsStart = random.randint(0, mels.size(
@@ -75,6 +76,7 @@ class TransducerDataset(data.Dataset):
             assert segmentMel.size(0) == 80
 
         # segmentMel  may truncate, phone and token are not.
+        # [L_phone], [L_token], [80, segmentSize]
         return (phoneIds, tokenSeq, segmentMel)
 
 
@@ -84,19 +86,32 @@ class TransducerCollate():
 
     def __call__(self, batch):
         """ phoneIds, tokenSeq, ssegmentMel = batch
+            phoneIds: [L_phone] 
+            tokenSeq: [L_token]
+            ssegmentMel: [80, segmentSize]
+        Return:
+            phonePadded: [B,max_phone_len]
+            tokenPadded: [B,max_token_len]
+            melPadded: [B,80,segmentSize]
+            phoneSeqLens: [B]
+            tokenSeqLens: [B]
         """
+
         inputLens, idxSortedDescreasing = torch.sort(torch.LongTensor(
             [x[0].size(0) for x in batch]),
             dim=0,
-            descending=True)
+            descending=True)  # inputLens是长度倒叙结果，idxSortedDescreasing是其在batch中的索引
 
-        maxInputLen = inputLens[0]
-        phonePadded = torch.zeros(len(batch), maxInputLen, dtype=torch.long)
+        maxInputLen = inputLens[0]  # phone的最大长度
+        phonePadded = torch.zeros(
+            len(batch), maxInputLen, dtype=torch.long)  # [B,L_max_phone]
 
-        maxTokenLen = max(x[1].size(0) for x in batch)
-        tokenPadded = torch.zeros(len(batch), maxTokenLen, dtype=torch.long)
+        maxTokenLen = max(x[1].size(0) for x in batch)  # token的最大长度
+        tokenPadded = torch.zeros(
+            len(batch), maxTokenLen, dtype=torch.long)  # [B,L_max_token]
 
-        melPadded = torch.FloatTensor(len(batch), 80, self.segmentsize)
+        melPadded = torch.FloatTensor(
+            len(batch), 80, self.segmentsize)  # [B,80,segmentSize]
 
         tokenSeqLens = torch.LongTensor(len(batch))
         phoneSeqLens = torch.LongTensor(len(batch))

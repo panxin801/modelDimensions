@@ -6,3 +6,4 @@ __pycache__
 total.txt
 wav2vec2-xlsr-53-espeak-cv-ft
 vctkDataset
+stage1model

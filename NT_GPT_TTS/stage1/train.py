@@ -1,4 +1,5 @@
 import argparse
+import numpy as np
 import os
 import torch
 import torch.multiprocessing as mp
@@ -6,13 +7,35 @@ import torch.distributed as dist
 import torch.nn as nn
 import json
 import warnings
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from utils import (Hparams, count_parameters)
 from dataset import (TransducerDataset, TransducerCollate)
 from stage1 import Stage1Net
+from optim import (Eden, Eve)
+
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
+
+
+def save_checkpoint(model, optimizer, lr, iteration, filepath):
+    if hasattr(model, "module"):
+        state_dict = model.module.state_dict()
+    else:
+        state_dict = model.state_dict()
+
+    dirName = os.path.dirname(filepath)
+    os.makedirs(dirName, exist_ok=True)
+
+    torch.save({
+        "iteration": iteration,
+        "state_dict": state_dict,
+        "lr": lr,
+        "optimizer": optimizer.state_dict()
+    }, filepath)
 
 
 def get_args():
@@ -53,11 +76,13 @@ def train(rank, args, hparams):
     trainDataset = TransducerDataset(args.mel_scp,
                                      args.token_scp,
                                      args.train_meta,
-                                     "train")
+                                     "train",
+                                     hparams.segment_size)
     validDataset = TransducerDataset(args.mel_scp,
                                      args.token_scp,
                                      args.valid_meta,
-                                     "valid")
+                                     "valid",
+                                     hparams.segment_size)
     collateFn = TransducerCollate(hparams.segment_size)
 
     if args.num_gpus > 1:
@@ -93,6 +118,172 @@ def train(rank, args, hparams):
                       inner_dim=513,
                       ref_dim=513,
                       use_fp16=hparams.use_fp16)
+    pams = count_parameters(model)
+    print(f"Number of parameters: {pams}")
+
+    if args.num_gpus > 1:
+        model = DDP(model.cuda(), device_ids=[
+                    rank], find_unused_parameters=True)
+    else:
+        model = model.cuda()
+
+    iteration = 0
+    accu_iter = 0
+    epoch_offset = 0
+    init_lr = hparams.initial_lr
+
+    # Restore from ckpt
+    if not args.checkpoint_path is None:
+        assert os.path.isfile(
+            args.checkpoint_path), f"{args.checkpoint_path} not found"
+
+        checkpoint = torch.load(args.checkpoint_path, map_location="cuda")
+        model.load_state_dict(checkpoint["state_dict"])
+        print(f"Load stage1 ckpt successful")
+
+        if args.load_iteration:
+            init_lr = checkpoint["lr"]
+            iteration = checkpoint["iteration"]
+            iteration += 1
+            epoch_offset = int(iteration / len(trainLoader))
+        print(f"Restore successful, {iteration=}, {epoch_offset=}")
+
+    # init optimizer
+    optimizer = Eve(model.parameters(), lr=init_lr)
+    lr_scheduler = Eden(optimizer, 5000, 6)
+
+    if not args.checkpoint_path is None:
+        optimizer.load_state_dict(checkpoint["optimizer"])
+
+    for param in optimizer.param_groups:
+        param["initial_lr"] = init_lr  # param is a dict
+
+    # Train loop
+    scaler = torch.amp.GradScaler(enabled=hparams.use_fp16)
+    if rank == 0:
+        sw = SummaryWriter(os.path.join(args.output_directory, 'logs'))
+
+    for epoch in range(epoch_offset, hparams.epoches):
+        model.train()
+        print(f"{epoch=}")
+
+        if args.num_gpus > 1:
+            trainSampler.set_epoch(epoch)
+
+        epochLoss = 0.0
+        batchNum = 0
+        pbar = tqdm(trainLoader)
+        counter = 0
+        for batch in pbar:
+            counter += 1
+
+            phonePadded, tokenPadded, melPadded, phoneSeqLens, tokenSeqLens = batch
+            phonePadded = phonePadded.cuda().long()
+            tokenPadded = tokenPadded.cuda().long()
+            melPadded = melPadded.cuda().float()
+            phoneSeqLens = phoneSeqLens.cuda().long()
+            tokenSeqLens = tokenSeqLens.cuda().long()
+
+            # phonePadded = phonePadded.cpu().long()
+            # tokenPadded = tokenPadded.cpu().long()
+            # melPadded = melPadded.cpu().float()
+            # phoneSeqLens = phoneSeqLens.cpu().long()
+            # tokenSeqLens = tokenSeqLens.cpu().long()
+            # model.cpu()
+
+            simple_loss, pruned_loss = model(phonePadded,
+                                             tokenPadded,
+                                             phoneSeqLens,
+                                             tokenSeqLens,
+                                             melPadded,
+                                             tokenPadded[:, 1:],
+                                             warmup=1.0)
+
+            # check if NaN
+            simple_loss_is_finite = torch.isfinite(simple_loss)
+            pruned_loss_is_finite = torch.isfinite(pruned_loss)
+            is_finite = simple_loss_is_finite & pruned_loss_is_finite
+            if not torch.all(is_finite):
+                simple_loss = simple_loss[simple_loss_is_finite]
+                pruned_loss = pruned_loss[pruned_loss_is_finite]
+
+                # If either all simple_loss or pruned_loss is inf or nan,
+                # we stop the training process by raising an exception
+                if torch.all(~simple_loss_is_finite) or torch.all(~pruned_loss_is_finite):
+                    raise ValueError(
+                        "There are too many utterances in this batch "
+                        "leading to inf or nan losses."
+                    )
+
+            simple_loss = simple_loss.sum()
+            pruned_loss = pruned_loss.sum()
+            losses = simple_loss * 0.5 + pruned_loss
+            showLoss = losses.clone().detach()
+            epochLoss += losses
+
+            if counter == 10:
+                break
+
+        optimizer.zero_grad()
+        scaler.scale(losses).backward()
+        scaler.unscale_(optimizer)
+        lr_scheduler.step_batch(iteration)
+        scaler.step(optimizer)
+        scaler.update()
+
+        batchNum += 1
+        accu_iter += 1
+        if rank == 0:
+            pbar.set_description(
+                "Train {} total_loss{:.4f}".format(accu_iter, showLoss.item()
+                                                   ))
+
+        # save
+        if rank == 0 and (iteration % hparams.saved_checkpoint) == 0:
+            print("save checkpint...")
+            checkpoint_path = os.path.join(
+                args.output_directory, "ckpt",
+                "checkpoint_{}".format(iteration))
+            save_checkpoint(
+                model, optimizer, optimizer.param_groups[0]['lr'], iteration, checkpoint_path)
+        if rank == 0 and (iteration % hparams.summary_interval == 0):
+            sw.add_scalar("rnn_loss", showLoss, iteration)
+
+        iteration += 1
+
+        # Eval
+        if rank == 0 and (iteration % hparams.evaluate_epoch == 0):
+            model.eval()
+            countNum = 0
+            with torch.inference_mode():
+                pbar2 = tqdm(validLoader)
+                for i, batch in enumerate(pbar2):
+                    phonePadded, tokenPadded, melPadded, phoneSeqLens, tokenSeqLens = batch
+                    phonePadded = phonePadded.cuda().long()
+                    tokenPadded = tokenPadded.cuda().long()
+                    melPadded = melPadded.cuda().float()
+                    phoneSeqLens = phoneSeqLens.cuda().long()
+                    tokenSeqLens = tokenSeqLens.cuda().long()
+
+                    if args.num_gpus > 1:
+                        result = model.module.recognize(
+                            inputs=phonePadded, input_lens=phoneSeqLens, reference_audio=melPadded)
+                    else:
+                        result = model.recognize(
+                            inputs=phonePadded, input_lens=phoneSeqLens, reference_audio=melPadded)
+
+                    countNum += 1
+                    os.makedirs(os.path.join(args.output_directory,
+                                str(accu_iter)), exist_ok=True)
+                    np.save(os.path.join(args.output_directory, str(
+                        accu_iter), str(i) + '.npy'), result.cpu().data.numpy)
+                    if countNum == 5:
+                        break
+
+        epochLoss /= batchNum
+        print("Epoch {}: Train {} total_loss: {:.4f}".format(
+            epoch, accu_iter, epochLoss.item()))
+        lr_scheduler.step()
 
 
 if __name__ == "__main__":
