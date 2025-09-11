@@ -7,8 +7,9 @@ import torch.nn as nn
 import json
 import warnings
 
-from utils import Hparams
+from utils import (Hparams, count_parameters)
 from dataset import (TransducerDataset, TransducerCollate)
+from stage1 import Stage1Net
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
@@ -49,6 +50,49 @@ def train(rank, args, hparams):
     torch.cuda.set_device(rank)
 
     # Load datasets
+    trainDataset = TransducerDataset(args.mel_scp,
+                                     args.token_scp,
+                                     args.train_meta,
+                                     "train")
+    validDataset = TransducerDataset(args.mel_scp,
+                                     args.token_scp,
+                                     args.valid_meta,
+                                     "valid")
+    collateFn = TransducerCollate(hparams.segment_size)
+
+    if args.num_gpus > 1:
+        trainSampler = torch.utils.data.distributed.DistributedSampler(
+            trainDataset)
+        shuffle = False
+    else:
+        trainSampler = None
+        shuffle = True
+
+    trainLoader = torch.utils.data.DataLoader(trainDataset,
+                                              batch_size=args.batch_size,
+                                              shuffle=shuffle,
+                                              sampler=trainSampler,
+                                              collate_fn=collateFn,
+                                              num_workers=8,
+                                              pin_memory=True,
+                                              drop_last=False)
+    validLoader = torch.utils.data.DataLoader(validDataset,
+                                              batch_size=args.batch_size,
+                                              shuffle=False,
+                                              collate_fn=collateFn,
+                                              num_workers=4,
+                                              pin_memory=False,
+                                              drop_last=False)
+
+    # Init model
+    model = Stage1Net(text_dim=384,
+                      num_vocabs=513,
+                      num_phonemes=512,
+                      token_dim=256,
+                      hid_token_dim=512,
+                      inner_dim=513,
+                      ref_dim=513,
+                      use_fp16=hparams.use_fp16)
 
 
 if __name__ == "__main__":
@@ -65,7 +109,8 @@ if __name__ == "__main__":
 
     if torch.cuda.is_available():
         torch.cuda.manual_seed(hparams.seed)
-        torch.cuda.manual_seed_all(hparams.seed)
+        # torch.cuda.manual_seed_all(hparams.seed)
+        torch.manual_seed(hparams.seed)
 
         args.num_gpus = torch.cuda.device_count()
         args.batch_size = int(hparams.batch_size / args.num_gpus)

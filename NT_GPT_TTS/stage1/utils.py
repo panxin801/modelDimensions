@@ -28,3 +28,7 @@ class Hparams:
 
     def __repr__(self,):
         return self.__dict__.__repr__()
+
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters())
