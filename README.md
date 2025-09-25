@@ -1,13 +1,19 @@
 # modelDimensions
 Personal read code detail
 
-VITS: cVae+Flow e2e(end-to-end) TTS model
+VITS: cVae+Flow e2e(end-to-end) TTS model.
 
-HIFI-GAN: Non-autoregressive vocoder
+HIFI-GAN: Non-autoregressive vocoder.
 
-Gpt-Sovits: Few-shot Voice conversion and TTS system
+Gpt-Sovits: Few-shot Voice conversion and TTS system.
 
-emotional-vits: Emotional vits model
+emotional-vits: Emotional vits model.
+
+NT_GPT_TTS： Neural transducer two stage TTS model. Working like GPT_sovits.
+
+VallE: First language model like TTS model, using neural codec extract discrete codes as intermediate and put into neural decoder synthesize wavs.
+
+
 
 
 ## Details
@@ -39,4 +45,6 @@ emotional-vits: Emotional vits model
     - paper: https://arxiv.org/pdf/2401.01498 
 
     Using wav2vec2 and K-Means extract discrete token as stage1,  put into vits architecture acoustic as stage2, pipeline similar to GPT_VITS
+    
+- VallE(unoffical implementation): https://github.com/lifeiteng/vall-e
 
