@@ -24,17 +24,11 @@ import argparse
 import logging
 import torch
 import os
-import sys
 from pathlib import Path
 from lhotse.recipes.utils import read_manifests_if_cached
 from lhotse import (CutSet, NumpyHdf5Writer)
 from icefall.utils import get_executor
 from tqdm import tqdm
-
-
-# sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(
-#     os.path.dirname(os.path.abspath(__file__))))))
-# sys.path.append(os.path.join(os.getcwd(), "egs/bznsyp"))
 
 from valle.data import (TextTokenizer, AudioTokenExtractor,
                         AudioTokenConfig, tokenize_text)
