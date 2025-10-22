@@ -92,7 +92,8 @@ def main():
             "train-other-500",
         ]
     else:
-        dataset_parts = dataset_parts.replace("-p", "").strip().split(" ")
+        dataset_parts = dataset_parts.replace(
+            "-p", "").strip().split(" ")  # ["train", "dev", "test"]
 
     assert len(dataset_parts) >= 1, "No dataset parts specified"
 
@@ -107,7 +108,7 @@ def main():
 
     # Init phonemizer
     text_tokenizer = None
-    if args.text_extractor:
+    if args.text_extractor:  # pypinyin_initials_finals
         text_tokenizer = TextTokenizer(backend=args.text_extractor)
 
     audio_extractor = None
@@ -199,7 +200,7 @@ def main():
                             c.supervisions[0].custom = {}
                         elif args.prefix == "baker_zh":
                             phonemes = tokenize_text(
-                                text_tokenizer, text=c.supervisions[0].custom["normalized_text"])  # 有-在每个字之间
+                                text_tokenizer, text=c.supervisions[0].custom["normalized_text"])  # phonemes有-在每个字之间
                             c.supervisions[0].custom = {}
                         else:
                             assert args.prefix == "libritts"

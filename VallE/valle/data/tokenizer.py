@@ -110,6 +110,7 @@ class TextTokenizer:
         backend="espeak",
         separator=Separator(word="_", syllable="-", phone="|"),
         preserve_punctuation=True,
+        # punctuation_marks are puncuation symbols
         punctuation_marks: Union[str, Pattern] = Punctuation.default_marks(),
         with_stress: bool = False,
         tie: Union[bool, str] = False,
@@ -245,6 +246,7 @@ def tokenize_audio(tokenizer: AudioTokenizer, audip_path: str):
 
 @dataclass
 class AudioTokenConfig:
+    # Encodec downsample 320 times, and input wav are 24000Hz
     frame_shift: Seconds = 320.0 / 24000
     num_quantizers: int = 8
 
@@ -297,7 +299,7 @@ class AudioTokenExtractor(FeatureExtractor):
 
     @property
     def frame_shift(self) -> Seconds:
-        return self.config.frame_shift
+        return self.config.frame_shift  # from AudioTokenConfig.frame_shift
 
     def feature_dim(self, sampling_rate: int) -> int:
         return self.config.num_quantizers
@@ -313,9 +315,19 @@ class AudioTokenExtractor(FeatureExtractor):
         return padded_tensor, lengths
 
     def extract_batch(self, samples, sampling_rate, lengths) -> np.ndarray:
+        """ Args in: 
+            samples: list of [1, sample nums], len of list changes, total time fix
+            sampling_rate: 24000
+            lengths: may be None
+        Return:
+            retvalue: list of codes, each code is [Frames, num_quantizers]
+        """
+
+        # icefall call this func -> extractor.extract_batch()
         samples = [wav.squeeze() for wav in samples]
         device = self.tokenizer.device
-        samples, lengths = self.pad_tensor_list(samples, device)
+        samples, lengths = self.pad_tensor_list(
+            samples, device)  # [B, max_length], lenghts of each
         samples = samples.unsqueeze(1)
 
         if not isinstance(samples, torch.Tensor):
@@ -335,19 +347,21 @@ class AudioTokenExtractor(FeatureExtractor):
             # convert samples from list to tensor
             samples = torch.stack(samples, 0)
         # Extract discrete codes from EnCodec
-        with torch.no_grad():
+        with torch.inference_mode():
             encoded_frames = self.tokenizer.encode(
                 samples.detach().to(device))  # samples are [B,1,max_length]
-        encoded_frames = encoded_frames[0][0]  # [B, n_q, Frames]
+        # [B, n_q, Frames]. encoded_frames[0][0] must this, others are useless
+        encoded_frames = encoded_frames[0][0]
         batch_codes = []
         for b, length in enumerate(lengths):
-            codes = encoded_frames[b]
+            codes = encoded_frames[b]  # 取出每个样本的codes
+            # 计算每个样本本身的时长（去掉填充的部分）
             duration = round(length / sampling_rate, ndigits=12)
             expected_num_frames = compute_num_frames(
                 duration=duration,
                 frame_shift=self.frame_shift,
                 sampling_rate=sampling_rate,
-            )
+            )  # 计算每个样本本身的帧数（去掉填充的部分）
             batch_codes.append(codes[..., :expected_num_frames])
         return [codes.cpu().permute(1, 0).numpy() for codes in batch_codes]
 

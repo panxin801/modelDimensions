@@ -102,9 +102,9 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
   touch ${audio_feats_dir}/.bznsyp.tokenize.done
 
   cd ${audio_feats_dir}
-  ln -sf  egs/bznsyp/data/tokenized/baker_zh_cuts_train.jsonl.gz cuts_train.jsonl.gz
-  ln -sf  egs/bznsyp/data/tokenized/baker_zh_cuts_dev.jsonl.gz cuts_dev.jsonl.gz
-  ln -sf  egs/bznsyp/data/tokenized/baker_zh_cuts_test.jsonl.gz cuts_test.jsonl.gz
+  ln -sf  baker_zh_cuts_train.jsonl.gz cuts_train.jsonl.gz
+  ln -sf  baker_zh_cuts_dev.jsonl.gz cuts_dev.jsonl.gz
+  ln -sf  baker_zh_cuts_test.jsonl.gz cuts_test.jsonl.gz
 fi
 
 python3 ./bin/display_manifest_statistics.py --manifest-dir ${audio_feats_dir}
