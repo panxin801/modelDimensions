@@ -59,8 +59,7 @@ from lhotse.utils import fix_random_seed
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 from valle.data import TtsDataModule
-from valle.models import (add_model_arguments)
-# from valle.models import (add_model_arguments, get_model)
+from valle.models import (add_model_arguments, get_model)
 # from valle.modules.optim import (Eden, Eve, ScaledAdam)
 # from valle.modules.scheduler import get_scheduler
 
@@ -337,8 +336,40 @@ def run(rank, world_size, args):
     """
 
     params = get_params()
-    params.update(vars(args))
+    params.update(vars(args))  # args is Namespace is not iterable, so use vars
     print(params)
+
+    # fix random seed for reproducibility
+    fix_random_seed(params.seed)
+    rng = random.Random(params.seed)
+    if world_size > 1:
+        setup_dist(rank, world_size, params.master_port)
+
+    setup_logger(f"{params.exp_dir}/log/log-train")
+    logging.info("Training started")
+
+    # Set up tensorboard
+    if params.tensorboard and rank == 0:
+        if params.train_stage:
+            tb_writer = SummaryWriter(
+                f"{params.exp_dir}/tensorboard_stage{params.train_stage}")
+        else:
+            tb_writer = SummaryWriter(f"{params.exp_dir}/tensorboard")
+    else:
+        tb_writer = None
+
+    device = torch.device("cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda", rank)
+        # https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+
+    logging.info(f"Device: {device}")
+    logging.info(f"{params=}")
+
+    logging.info("About to create data module")
+    model = get_model(params)
 
 
 def main():

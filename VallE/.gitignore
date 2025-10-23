@@ -3,3 +3,5 @@ egs/bznsyp/data
 egs/bznsyp/download
 .vscode
 __pycache__
+
+exp

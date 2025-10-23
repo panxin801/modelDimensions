@@ -2,6 +2,17 @@ import argparse
 import torch.nn as nn
 from icefall.utils import (str2bool, AttributeDict)
 
+from .macros import (
+    NUM_AUDIO_TOKENS,
+    NUM_MEL_BINS,
+    NUM_SPEAKER_CLASSES,
+    NUM_TEXT_TOKENS,
+    SPEAKER_EMBEDDING_DIM,
+)
+from .transformer import Transformer
+from .valle import (VALLE, VALLF)
+from .visualizer import visualize
+
 
 def add_model_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
@@ -81,3 +92,44 @@ def add_model_arguments(parser: argparse.ArgumentParser):
         default=False,
         help="Apply Reworked Conformer scaling on Transformers.",
     )
+
+
+def get_model(params: AttributeDict) -> nn.Module:
+    if params.model_name.lower() in ["vall-f", "vallf"]:
+        model = VALLF(
+            params.decoder_dim,
+            params.nhead,
+            params.num_decoder_layers,
+            norm_first=params.norm_first,
+            add_prenet=params.add_prenet,
+            prefix_mode=params.prefix_mode,
+            share_embedding=params.share_embedding,
+            nar_scale_factor=params.scale_factor,
+            prepend_bos=params.prepend_bos,
+            num_quantizers=params.num_quantizers,
+        )
+    elif params.model_name.lower() in ["vall-e", "valle"]:
+        model = VALLE(
+            params.decoder_dim,
+            params.nhead,
+            params.num_decoder_layers,
+            norm_first=params.norm_first,
+            add_prenet=params.add_prenet,
+            prefix_mode=params.prefix_mode,
+            share_embedding=params.share_embedding,
+            nar_scale_factor=params.scale_factor,
+            prepend_bos=params.prepend_bos,
+            num_quantizers=params.num_quantizers,
+        )
+    else:
+        assert params.model_name in ["Transformer"]
+        model = Transformer(
+            params.decoder_dim,
+            params.nhead,
+            params.num_decoder_layers,
+            norm_first=params.norm_first,
+            add_prenet=params.add_prenet,
+            scaling_xformers=params.scaling_xformers,
+        )
+
+    return model

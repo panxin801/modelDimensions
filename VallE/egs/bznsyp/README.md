@@ -1,8 +1,3 @@
-# aishell1
-
-`150` 小时的数据不足以训练出稳定的结果，尝试加到 `500`/`1000` 小时的数据去训练
-* 当前的实现，韵母和声调放在一起组成建模单元，也增加了对数据量的需求。
-
 # Bznsyp
 
 ## Prepare dataset
@@ -157,3 +152,88 @@ Speech duration statistics:
 
 ## Training & Inference
 refer to [Training](../../README.md##Training&Inference)
+
+
+## Prefix Mode 0 1 2 4 for NAR Decoder
+  **Paper Chapter 5.1** "The average length of the waveform in LibriLight is 60 seconds. During
+training, we randomly crop the waveform to a random length between 10 seconds and 20 seconds. For the NAR acoustic prompt tokens, we select a random segment waveform of 3 seconds from the same utterance."
+  * **0**: no acoustic prompt tokens
+  * **1**: random prefix of current batched utterances **(This is recommended)**
+  * **2**: random segment of current batched utterances
+  * **4**: same as the paper (As they randomly crop the long waveform to multiple utterances, so the same utterance means pre or post utterance in the same long waveform.)
+    ```
+    # If train NAR Decoders with prefix_mode 4
+    python3 bin/trainer.py --prefix_mode 4 --dataset libritts --input-strategy PromptedPrecomputedFeatures ...
+    ```
+
+
+```
+cd egs/bznsyp
+
+# step1 prepare dataset
+bash prepare.sh --stage -1 --stop-stage 3
+
+# step2 train the model on one GPU with 24GB memory
+exp_dir=exp/valle
+
+## Train AR model
+python3 bin/trainer.py --max-duration 80 --filter-min-duration 0.5 --filter-max-duration 14 --train-stage 1 \
+      --num-buckets 6 --dtype "bfloat16" --save-every-n 10000 --valid-interval 20000 \
+      --model-name valle --share-embedding true --norm-first true --add-prenet false \
+      --decoder-dim 1024 --nhead 16 --num-decoder-layers 12 --prefix-mode 1 \
+      --base-lr 0.05 --warmup-steps 200 --average-period 0 \
+      --num-epochs 20 --start-epoch 1 --start-batch 0 --accumulate-grad-steps 4 \
+      --exp-dir ${exp_dir} --dataset baker-zh
+
+## Train NAR model
+cp ${exp_dir}/best-valid-loss.pt ${exp_dir}/epoch-2.pt  # --start-epoch 3=2+1
+python3 bin/trainer.py --max-duration 40 --filter-min-duration 0.5 --filter-max-duration 14 --train-stage 2 \
+      --num-buckets 6 --dtype "float32" --save-every-n 10000 --valid-interval 20000 \
+      --model-name valle --share-embedding true --norm-first true --add-prenet false \
+      --decoder-dim 1024 --nhead 16 --num-decoder-layers 12 --prefix-mode 1 \
+      --base-lr 0.05 --warmup-steps 200 --average-period 0 \
+      --num-epochs 40 --start-epoch 3 --start-batch 0 --accumulate-grad-steps 4 \
+      --exp-dir ${exp_dir} --dataset baker-zh
+
+# step3 inference
+python3 bin/infer.py --output-dir infer/demos \
+    --checkpoint=${exp_dir}/best-valid-loss.pt \
+    --text-prompts "KNOT one point one five miles per hour." \
+    --audio-prompts ./prompts/8463_294825_000043_000000.wav \
+    --text "To get up and running quickly just follow the steps below." \
+
+# Demo Inference
+https://github.com/lifeiteng/lifeiteng.github.com/blob/main/valle/run.sh#L68
+```
+
+
+```json
+"args": [
+                "--max-duration", "20",
+                "--filter-min-duration", "0.5",
+                "--filter-max-duration" ,"14",
+                "--train-stage", "1", 
+                "--num-buckets","6", 
+                "--dtype", "bfloat16", 
+                "--save-every-n", "100", 
+                "--valid-interval", "200", 
+                "--model-name", "valle", 
+                "--share-embedding" ,"true",
+                "--norm-first", "true",
+                "--add-prenet" ,"false",
+                "--decoder-dim" ,"1024",
+                "--nhead", "16",
+                "--num-decoder-layers", "12",
+                "--prefix-mode", "1",
+                "--base-lr","0.05", 
+                "--warmup-steps" ,"200",
+                "--average-period" ,"0",
+                "--num-epochs" ,"20", 
+                "--start-epoch", "1", 
+                "--start-batch","0", 
+                "--accumulate-grad-steps" ,"2",
+                "--exp-dir", "exp/valle",
+                "--dataset", "baker-zh",
+                "--inf-check", "true",
+                ],
+```
