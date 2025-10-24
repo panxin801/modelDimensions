@@ -110,16 +110,16 @@ def get_model(params: AttributeDict) -> nn.Module:
         )
     elif params.model_name.lower() in ["vall-e", "valle"]:
         model = VALLE(
-            params.decoder_dim,
-            params.nhead,
-            params.num_decoder_layers,
-            norm_first=params.norm_first,
-            add_prenet=params.add_prenet,
-            prefix_mode=params.prefix_mode,
-            share_embedding=params.share_embedding,
-            nar_scale_factor=params.scale_factor,
-            prepend_bos=params.prepend_bos,
-            num_quantizers=params.num_quantizers,
+            params.decoder_dim,  # 1024
+            params.nhead,  # 16
+            params.num_decoder_layers,  # 12
+            norm_first=params.norm_first,  # True
+            add_prenet=params.add_prenet,  # False
+            prefix_mode=params.prefix_mode,  # 1
+            share_embedding=params.share_embedding,  # True
+            nar_scale_factor=params.scale_factor,  # 1.0
+            prepend_bos=params.prepend_bos,  # False
+            num_quantizers=params.num_quantizers,  # 8
         )
     else:
         assert params.model_name in ["Transformer"]

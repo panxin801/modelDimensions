@@ -51,16 +51,16 @@ class VALLF(nn.Module):
     """
 
     def __init__(self,
-                 d_model: int,
-                 nhead: int,
-                 num_layers: int,
+                 d_model: int,  # 1024
+                 nhead: int,  # 16
+                 num_layers: int,  # 12
                  norm_first: bool = True,
                  add_prenet: bool = False,
                  decoder_cls: Union[nn.TransformerDecoder,
                                     nn.TransformerEncoder] = nn.TransformerDecoder,
                  decoder_layer_cls: Union[TransformerDecoderLayer,
                                           TransformerEncoderLayer] = TransformerDecoderLayer,
-                 prefix_mode: int = 0,
+                 prefix_mode: int = 0,  # 1
                  share_embedding: bool = True,
                  nar_scale_factor: float = 1.0,
                  prepend_bos: bool = False,
@@ -78,14 +78,17 @@ class VALLF(nn.Module):
 
         super().__init__()
 
-        nar_d_model = int(d_model * nar_scale_factor)
+        nar_d_model = int(d_model * nar_scale_factor)  # 1024 *1.0
 
-        self.ar_text_embedding = TokenEmbedding(d_model, NUM_TEXT_TOKENS)  # W_x
-        self.nar_text_embedding = TokenEmbedding(nar_d_model, NUM_TEXT_TOKENS)
+        self.ar_text_embedding = TokenEmbedding(
+            d_model, NUM_TEXT_TOKENS)  # W_x 1024, 512
+        self.nar_text_embedding = TokenEmbedding(
+            nar_d_model, NUM_TEXT_TOKENS)  # 1024,512
 
+        # ID NUM_AUDIO_TOKENS=1024
         # ID NUM_AUDIO_TOKENS     -> PAD
         # ID NUM_AUDIO_TOKENS + 1 -> BOS
-        self.ar_audio_prepend_bos = prepend_bos
+        self.ar_audio_prepend_bos = prepend_bos  # False
         self.ar_audio_embedding = TokenEmbedding(
             d_model, NUM_AUDIO_TOKENS + 1 + int(prepend_bos))
 
@@ -139,7 +142,7 @@ class VALLF(nn.Module):
                               batch_first=True,
                               norm_first=norm_first),
             num_layers=num_layers,
-            nomr=LayerNorm(d_model) if norm_first else None,
+            norm=LayerNorm(d_model) if norm_first else None,
         )
         self.ar_predict_layer = nn.Linear(
             d_model, NUM_AUDIO_TOKENS + 1, bias=False)
@@ -247,13 +250,13 @@ class VALLF(nn.Module):
 
     def stage_parameters(self, stage: int = 1) -> Iterator[nn.Parameter]:
         assert stage > 0
-        if stage == 1:
+        if stage == 1:  # AR decoder
             for name, param in self.named_parameters():
                 if name.startswith("ar_"):
                     print(f" AR parameter: {name}")
                     yield param
 
-        if stage == 2:
+        if stage == 2:  # NAR decoder
             for name, param in self.named_parameters():
                 if name.startswith("nar_"):
                     print(f"NAR parameter: {name}")

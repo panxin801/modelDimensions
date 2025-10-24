@@ -37,9 +37,9 @@ class LayerNorm(nn.Module):
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
             self.weight = nn.Parameter(torch.empty(
-                self.normalized_shape), **factory_kwargs)
+                self.normalized_shape, **factory_kwargs))
             self.bias = nn.Parameter(torch.empty(
-                self.normalized_shape), **factory_kwargs)
+                self.normalized_shape, **factory_kwargs))
         else:
             self.register_parameter("weight", None)
             self.register_parameter("bias", None)

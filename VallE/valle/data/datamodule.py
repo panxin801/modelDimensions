@@ -23,7 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import (Any, Dict, Optional)
 from icefall.utils import str2bool
-from lhotse import (CutSet, load_manifest)
+from lhotse import (CutSet, load_manifest_lazy)
 from lhotse.dataset import (CutConcatenate,
                             DynamicBucketingSampler,
                             PrecomputedFeatures,
@@ -31,6 +31,29 @@ from lhotse.dataset import (CutConcatenate,
                             SpecAugment,)
 from lhotse.dataset.input_strategies import OnTheFlyFeatures
 from lhotse.utils import fix_random_seed
+
+from .collation import get_text_token_collater
+from .dataset import SpeechSynthesisDataset
+from .fbank import get_fbank_extractor
+from .input_strategies import PromptedPrecomputedFeatures
+
+
+PrecomputedFeatures = PrecomputedFeatures
+
+
+class _SeedWorkers:
+    def __init__(self, seed: int):
+        self.seed = seed
+
+    def __call__(self, worker_id: int):
+        fix_random_seed(self.seed + worker_id)
+
+
+def _get_input_strategy(input_strategy, dataset, cuts):
+    if input_strategy == "PromptedPrecomputedFeatures":
+        return PromptedPrecomputedFeatures(dataset, cuts)
+
+    return eval(input_strategy)()
 
 
 class TtsDataModule:
@@ -207,3 +230,204 @@ class TtsDataModule:
             default=24000,
             help="""Audio sampling rate.""",
         )
+
+    def train_dataloaders(self, cuts_train: CutSet,
+                          sampler_state_dict: Optional[Dict[str, Any]] = None) -> DataLoader:
+        """
+        Args:
+          cuts_train:
+            CutSet for training.
+          sampler_state_dict:
+            The state dict for the training sampler.
+        """
+        transforms = []
+
+        if self.args.concatenate_cuts:
+            logging.info(
+                f"Using cut concatenation with duration factor "
+                f"{self.args.duration_factor} and gap {self.args.gap}."
+            )
+            # Cut concatenation should be the first transform in the list,
+            # so that if we e.g. mix noise in, it will fill the gaps between
+            # different utterances.
+            transforms = [
+                CutConcatenate(
+                    duration_factor=self.args.duration_factor, gap=self.args.gap
+                )
+            ] + transforms
+
+        input_transforms = []
+        if self.args.enable_spec_aug:
+            logging.info("Enable SpecAugment")
+            logging.info(
+                f"Time warp factor: {self.args.spec_aug_time_warp_factor}"
+            )
+            # Set the value of num_frame_masks according to Lhotse's version.
+            # In different Lhotse's versions, the default of num_frame_masks is
+            # different.
+            num_frame_masks = 10
+            num_frame_masks_parameter = inspect.signature(
+                SpecAugment.__init__
+            ).parameters["num_frame_masks"]
+            if num_frame_masks_parameter.default == 1:
+                num_frame_masks = 2
+            logging.info(f"Num frame mask: {num_frame_masks}")
+            input_transforms.append(
+                SpecAugment(
+                    time_warp_factor=self.args.spec_aug_time_warp_factor,
+                    num_frame_masks=num_frame_masks,
+                    features_mask_size=27,
+                    num_feature_masks=2,
+                    frames_mask_size=100,
+                )
+            )
+        else:
+            logging.info("Disable SpecAugment")
+
+        logging.info("About to create train dataset")
+        if self.args.on_the_fly_feats:
+            # NOTE: the PerturbSpeed transform should be added only if we
+            # remove it from data prep stage.
+            # Add on-the-fly speed perturbation; since originally it would
+            # have increased epoch size by 3, we will apply prob 2/3 and use
+            # 3x more epochs.
+            # Speed perturbation probably should come first before
+            # concatenation, but in principle the transforms order doesn't have
+            # to be strict (e.g. could be randomized)
+            # transforms = [PerturbSpeed(factors=[0.9, 1.1], p=2/3)] + transforms   # noqa
+            # Drop feats to be on the safe side.
+            train = SpeechSynthesisDataset(
+                get_text_token_collater(self.args.text_tokens),
+                cut_transforms=transforms,
+                feature_input_strategy=OnTheFlyFeatures(get_fbank_extractor()),
+                feature_transforms=input_transforms,
+            )
+        else:
+            train = SpeechSynthesisDataset(
+                get_text_token_collater(self.args.text_tokens),
+                feature_input_strategy=_get_input_strategy(
+                    self.args.input_strategy, self.args.dataset, cuts_train
+                ),
+                cut_transforms=transforms,
+                feature_transforms=input_transforms,
+            )
+
+        if self.args.bucketing_sampler:
+            logging.info("Using DynamicBucketingSampler")
+            train_sampler = DynamicBucketingSampler(
+                cuts_train,
+                max_duration=self.args.max_duration,
+                shuffle=self.args.shuffle,
+                buffer_size=self.args.buffer_size,
+                shuffle_buffer_size=self.args.shuffle_buffer_size,
+                quadratic_duration=10,
+                num_cuts_for_bins_estimate=10000,
+                drop_last=True,
+            )
+        else:
+            logging.info(
+                "Using SimpleCutSampler and sort by duraton(ascending=True)."
+            )
+            cuts_train = cuts_train.to_eager().sort_by_duration(ascending=True)
+            train_sampler = SimpleCutSampler(
+                cuts_train,
+                max_duration=self.args.max_duration,
+                shuffle=self.args.shuffle,
+            )
+        logging.info("About to create train dataloader")
+
+        if sampler_state_dict is not None:
+            logging.info("Loading sampler state dict")
+            train_sampler.load_state_dict(sampler_state_dict)
+
+        # 'seed' is derived from the current random state, which will have
+        # previously been set in the main process.
+        seed = torch.randint(0, 100000, ()).item()
+        worker_init_fn = _SeedWorkers(seed)
+
+        train_dl = DataLoader(
+            train,
+            sampler=train_sampler,
+            batch_size=None,
+            num_workers=self.args.num_workers,
+            persistent_workers=False,
+            worker_init_fn=worker_init_fn,
+        )
+
+        return train_dl
+
+    def valid_dataloaders(self, cuts_valid: CutSet) -> DataLoader:
+        logging.info("About to create dev dataset")
+        if self.args.on_the_fly_feats:
+            validate = SpeechSynthesisDataset(
+                get_text_token_collater(self.args.text_tokens),
+                feature_input_strategy=OnTheFlyFeatures(get_fbank_extractor()),
+                cut_transforms=[],
+            )
+        else:
+            validate = SpeechSynthesisDataset(
+                get_text_token_collater(self.args.text_tokens),
+                feature_input_strategy=_get_input_strategy(
+                    self.args.input_strategy, self.args.dataset, cuts_valid
+                ),
+                cut_transforms=[],
+            )
+        valid_sampler = DynamicBucketingSampler(
+            cuts_valid,
+            max_duration=self.args.max_duration,
+            shuffle=False,
+            drop_last=True,
+        )
+        logging.info("About to create dev dataloader")
+        valid_dl = DataLoader(
+            validate,
+            sampler=valid_sampler,
+            batch_size=None,
+            num_workers=4,
+            persistent_workers=False,
+        )
+
+        return valid_dl
+
+    def test_dataloaders(self, cuts: CutSet) -> DataLoader:
+        logging.debug("About to create test dataset")
+        test = SpeechSynthesisDataset(
+            get_text_token_collater(self.args.text_tokens),
+            feature_input_strategy=OnTheFlyFeatures(get_fbank_extractor())
+            if self.args.on_the_fly_feats
+            else _get_input_strategy(
+                self.args.input_strategy, self.args.dataset, cuts
+            ),
+            cut_transforms=[],
+        )
+        sampler = DynamicBucketingSampler(
+            cuts,
+            max_duration=self.args.max_duration,
+            shuffle=False,
+            drop_last=True,
+        )
+        logging.debug("About to create test dataloader")
+        test_dl = DataLoader(
+            test,
+            batch_size=None,
+            sampler=sampler,
+            num_workers=self.args.num_workers,
+        )
+        return test_dl
+
+    @lru_cache()
+    def train_cuts(self) -> CutSet:
+        logging.info("About to get train cuts")
+        return load_manifest_lazy(
+            self.args.manifest_dir / "cuts_train.jsonl.gz"
+        )
+
+    @lru_cache()
+    def dev_cuts(self) -> CutSet:
+        logging.info("About to get dev cuts")
+        return load_manifest_lazy(self.args.manifest_dir / "cuts_dev.jsonl.gz")
+
+    @lru_cache()
+    def test_cuts(self) -> CutSet:
+        logging.info("About to get test cuts")
+        return load_manifest_lazy(self.args.manifest_dir / "cuts_test.jsonl.gz")

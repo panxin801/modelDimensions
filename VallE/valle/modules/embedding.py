@@ -19,7 +19,7 @@ import torch.nn as nn
 
 class TokenEmbedding(nn.Module):
     def __init__(self,
-                 dim_model: int,
+                 dim_model: int,  # 1024
                  vocab_size: int,
                  dropout: float = 0.0):
 
@@ -61,7 +61,7 @@ class SinePositionalEmbedding(nn.Module):
 
         self.reverse = False
         self.pe = None
-        self.extend_pe(torch.Tensor(0.0).expand(1, 4000))
+        self.extend_pe(torch.tensor(0.0).expand(1, 4000))
 
     def extend_pe(self, x):
         """Reset the positional encodings.
