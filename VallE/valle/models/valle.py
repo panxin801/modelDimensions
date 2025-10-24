@@ -280,7 +280,7 @@ class VALLF(nn.Module):
         # inputs, targets
         if self.ar_audio_prepend_bos:
             return (F.pad(targets[:, :-1], (1, 0), value=NUM_AUDIO_TOKENS + 1), targets)
-        return targets[:, :-1], targets[:, 1]
+        return targets[:, :-1], targets[:, 1:]
 
     def _prepare_prompts(self,
                          y,
@@ -307,7 +307,7 @@ class VALLF(nn.Module):
             y_emb = self.nar_audio_embeddings[0](y)
             for j in range(1, nar_stage):
                 # Formula (4) (5)
-                y_emb = y_emb + self.nar_audio_embeddings[j](codes[:, j])
+                y_emb = y_emb + self.nar_audio_embeddings[j](codes[..., j])
         elif self.prefix_mode == 1:
             # prefix at begining
             int_low = (0.25 * y_lens.min()).type(torch.int64).item()
@@ -339,12 +339,13 @@ class VALLF(nn.Module):
             else:
                 prefix_len = y_prompts_codes.shape[1]
 
-            y_prompts = self.nar_audio_embedding[0](y_prompts_codes[:, 0])
+            y_prompts = self.nar_audio_embedding[0](y_prompts_codes[..., 0])
             y_emb = self.nar_audio_embeddings[0](y)
             for j in range(1, self.num_quantizers):
-                y_prompts += self.nar_audio_embeddings[j](y_prompts_codes[:, j])
+                y_prompts += self.nar_audio_embeddings[j](
+                    y_prompts_codes[..., j])
                 if j < nar_stage:
-                    y_emb += self.nar_audio_embeddings[j](codes[:, j])
+                    y_emb += self.nar_audio_embeddings[j](codes[..., j])
             y_emb = torch.concat([y_prompts, y_emb], axis=1)
         else:
             raise ValueError
@@ -407,7 +408,7 @@ class VALLF(nn.Module):
         # Training
         # AR Decoder
         y, targets = self.pad_y_eos(
-            codes[:, 0], y_mask_int, eos_id=NUM_AUDIO_TOKENS)
+            codes[..., 0], y_mask_int, eos_id=NUM_AUDIO_TOKENS)
 
         if train_stage in [0, 1]:
             y_emb = self.ar_audio_embedding(y)
@@ -455,7 +456,7 @@ class VALLF(nn.Module):
                 y, y_lens, codes, nar_stage, y_prompts_codes)
 
             y_len = y_lens.max()
-            targets = codes[:, nar_stage] + NUM_AUDIO_TOKENS * y_mask_int
+            targets = codes[..., nar_stage] + NUM_AUDIO_TOKENS * y_mask_int
             if self.prefix_mode in [2, 4]:
                 y_mask = F.pad(y_mask, (y_emb.shape[1] - y_len, 0), value=False)
             elif self.prefix_mode == 1:
@@ -541,7 +542,7 @@ class VALLF(nn.Module):
 
         # AR Decoder
         # TODO: Managing decoder steps avoid repetitive computation
-        y = prompts[:, 0]
+        y = prompts[..., 0]
         if self.ar_audio_prepend_bos:
             y = F.pad(y, (1, 0), value=NUM_AUDIO_TOKENS + 1)
 
@@ -595,7 +596,7 @@ class VALLF(nn.Module):
         if self.prefix_mode != 0:
             for j in range(1, self.num_quantizers):
                 y_emb[:,
-                      :prefix_len] += self.nar_audio_embeddings[j](prompts[:, j])
+                      :prefix_len] += self.nar_audio_embeddings[j](prompts[..., j])
 
         for i, (predict_layer, embedding_layer) in enumerate(
                 zip(self.nar_predict_layers, self.nar_audio_embeddings[1:])):
@@ -612,7 +613,8 @@ class VALLF(nn.Module):
             # Formula (4) (5)
             if i < 6:
                 if self.prefix_mode == 0:
-                    y_emb[:, :prefix_len] += embedding_layer(prompts[:, i + 1])
+                    y_emb[:,
+                          :prefix_len] += embedding_layer(prompts[..., i + 1])
                 y_emb[:, prefix_len:] += embedding_layer(samples)
 
         assert len(codes) == self.num_quantizers
@@ -718,7 +720,7 @@ class VALLE(VALLF):
         # Training
         # AR Decoder
         y, targets = self.pad_y_eos(
-            codes[:, 0], y_mask_int, eos_id=NUM_AUDIO_TOKENS)
+            codes[..., 0], y_mask_int, eos_id=NUM_AUDIO_TOKENS)
         x_len = x_lens.max()
 
         total_loss, metrics = 0.0, {}
@@ -787,7 +789,7 @@ class VALLE(VALLF):
 
             xy_pos = torch.concat([x, y_pos], dim=1)
             xy_dec, _ = self.ar_decoder((xy_pos, None), mask=xy_attn_mask)
-            logits = self.ar_predict_layer(xy_dec[:, x_len:].permute(0, 2, 1))
+            logits = self.ar_predict_layer(xy_dec[:, x_len:]).permute(0, 2, 1)
             # loss
             total_loss = F.cross_entropy(logits, targets, reduction=reduction)
 
@@ -816,7 +818,7 @@ class VALLE(VALLF):
                 y, y_lens, codes, nar_stage, y_prompts_codes)
 
             y_len = y_lens.max()
-            targets = codes[:, nar_stage] + NUM_AUDIO_TOKENS * y_mask_int
+            targets = codes[..., nar_stage] + NUM_AUDIO_TOKENS * y_mask_int
             # if self.prefix_mode in [2, 4]:
             #     y_mask = F.pad(y_mask, (y_emb.shape[1] - y_len, 0), value=False)
             # elif self.prefix_mode == 1:
@@ -916,7 +918,7 @@ class VALLE(VALLF):
 
         # AR Decoder
         # TODO: Managing decoder steps avoid repetitive computation
-        y = prompts[:, 0]
+        y = prompts[..., 0]
         if self.ar_audio_prepend_bos:
             y = F.pad(y, (1, 0), value=NUM_AUDIO_TOKENS + 1)
 
@@ -989,12 +991,13 @@ class VALLE(VALLF):
                 codes.append(samples)
 
                 if i < self.num_quantizers - 2:
-                    y_emb[:, :prefix_len] += embedding_layer(prompts[:, i + 1])
+                    y_emb[:,
+                          :prefix_len] += embedding_layer(prompts[..., i + 1])
                     y_emb[:, prefix_len:] += embedding_layer(samples)
         else:
             for j in range(1, self.num_quantizers):
                 y_emb[:,
-                      :prefix_len] += self.nar_audio_embeddings[j](prompts[:, j])
+                      :prefix_len] += self.nar_audio_embeddings[j](prompts[..., j])
             for i, (predict_layer, embedding_layer) in enumerate(
                     zip(self.nar_predict_layers, self.nar_audio_embeddings[1:])):
                 y_pos = self.nar_audio_prenet(y_emb)

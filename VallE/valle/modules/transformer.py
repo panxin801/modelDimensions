@@ -1,9 +1,10 @@
 import copy
 import numbers
-import torch
 from functools import partial
-from typing import (Any, Callable, List, Optional, Tuple, Union)
-from torch import nn, Tensor
+from typing import Any, Callable, List, Optional, Tuple, Union
+
+import torch
+from torch import Tensor, nn
 from torch.nn import functional as F
 
 from .activation import MultiheadAttention
@@ -19,15 +20,16 @@ class LayerNorm(nn.Module):
     eps: float
     elementwise_affine: bool
 
-    def __init__(self,
-                 normalized_shape: _shape_t,
-                 eps: float = 1e-5,
-                 elementwise_affine: bool = True,
-                 device=None,
-                 dtype=None) -> None:
+    def __init__(
+        self,
+        normalized_shape: _shape_t,
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
-        super().__init__()
-
+        super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
             normalized_shape = (normalized_shape,)  # type: ignore[assignment]
@@ -36,13 +38,16 @@ class LayerNorm(nn.Module):
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
-            self.weight = nn.Parameter(torch.empty(
-                self.normalized_shape, **factory_kwargs))
-            self.bias = nn.Parameter(torch.empty(
-                self.normalized_shape, **factory_kwargs))
+            self.weight = nn.Parameter(
+                torch.empty(self.normalized_shape, **factory_kwargs)
+            )
+            self.bias = nn.Parameter(
+                torch.empty(self.normalized_shape, **factory_kwargs)
+            )
         else:
             self.register_parameter("weight", None)
             self.register_parameter("bias", None)
+
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -50,26 +55,23 @@ class LayerNorm(nn.Module):
             nn.init.ones_(self.weight)
             nn.init.zeros_(self.bias)
 
-    def forward(self, input: Tensor,
-                embedding: Any = None) -> Tensor:
-        if isinstance(embedding, tuple):
+    def forward(self, input: Tensor, embedding: Any = None) -> Tensor:
+        if isinstance(input, tuple):
             input, embedding = input
-            return (F.layer_norm(
-                input,
-                self.normalized_shape,
-                self.weight,
-                self.bias,
-                self.eps),
-                embedding
+            return (
+                F.layer_norm(
+                    input,
+                    self.normalized_shape,
+                    self.weight,
+                    self.bias,
+                    self.eps,
+                ),
+                embedding,
             )
 
         assert embedding is None
         return F.layer_norm(
-            input,
-            self.normalized_shape,
-            self.weight,
-            self.bias,
-            self.eps
+            input, self.normalized_shape, self.weight, self.bias, self.eps
         )
 
     def extra_repr(self) -> str:
@@ -80,32 +82,30 @@ class LayerNorm(nn.Module):
 
 
 class AdaptiveLayerNorm(nn.Module):
-    """ Adaptive Layer Normalization
-    """
+    r"""Adaptive Layer Normalization"""
 
-    def __init__(self,
-                 d_model,
-                 norm) -> None:
-        super().__init__()
-
-        self.project_layer = nn.Linear(d_model, d_model * 2)
+    def __init__(self, d_model, norm) -> None:
+        super(AdaptiveLayerNorm, self).__init__()
+        self.project_layer = nn.Linear(d_model, 2 * d_model)
         self.norm = norm
         self.d_model = d_model
         self.eps = self.norm.eps
 
-    def forward(self,
-                input: Tensor,
-                embedding: Tensor = None) -> Tensor:
+    def forward(self, input: Tensor, embedding: Tensor = None) -> Tensor:
         if isinstance(input, tuple):
             input, embedding = input
-            weight, bias = torch.split(self.project_layer(embedding),
-                                       split_size_or_sections=self.d_model,
-                                       dim=-1)
+            weight, bias = torch.split(
+                self.project_layer(embedding),
+                split_size_or_sections=self.d_model,
+                dim=-1,
+            )
             return (weight * self.norm(input) + bias, embedding)
 
-        weight, bias = torch.split(self.project_layer(embedding),
-                                   split_size_or_sections=self.d_model,
-                                   dim=-1)
+        weight, bias = torch.split(
+            self.project_layer(embedding),
+            split_size_or_sections=self.d_model,
+            dim=-1,
+        )
         return weight * self.norm(input) + bias
 
 
@@ -179,27 +179,27 @@ class IdentityNorm(nn.Module):
 class TransformerEncoderLayer(nn.Module):
     __constants__ = ["batch_first", "norm_first"]
 
-    def __init__(self,
-                 d_model: int,
-                 nhead: int,
-                 dim_feedforward: int = 2048,
-                 dropout: float = 0.1,
-                 activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
-                 batch_first: bool = False,
-                 norm_first: bool = False,
-                 device=None,
-                 dtype=None,
-                 linear1_self_attention_cls: nn.Module = nn.Linear,
-                 linear2_self_attention_cls: nn.Module = nn.Linear,
-                 linear1_feedforward_cls: nn.Module = nn.Linear,
-                 linear2_feedforward_cls: nn.Module = nn.Linear,
-                 layer_norm_cls: nn.Module = LayerNorm,
-                 layer_norm_eps: float = 1e-5,
-                 adaptive_layer_norm=False,
-                 ) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        batch_first: bool = False,
+        norm_first: bool = False,
+        device=None,
+        dtype=None,
+        linear1_self_attention_cls: nn.Module = nn.Linear,
+        linear2_self_attention_cls: nn.Module = nn.Linear,
+        linear1_feedforward_cls: nn.Module = nn.Linear,
+        linear2_feedforward_cls: nn.Module = nn.Linear,
+        layer_norm_cls: nn.Module = LayerNorm,
+        layer_norm_eps: float = 1e-5,
+        adaptive_layer_norm=False,
+    ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
-        super().__init__()
-
+        super(TransformerEncoderLayer, self).__init__()
         self.self_attn = MultiheadAttention(
             d_model,
             nhead,
@@ -207,15 +207,17 @@ class TransformerEncoderLayer(nn.Module):
             batch_first=batch_first,
             linear1_cls=linear1_self_attention_cls,
             linear2_cls=linear2_self_attention_cls,
-            **factory_kwargs
+            **factory_kwargs,
         )
 
         # Implementation of Feedforward model
         self.linear1 = linear1_feedforward_cls(
-            d_model, dim_feedforward, **factory_kwargs)
+            d_model, dim_feedforward, **factory_kwargs
+        )
         self.dropout = nn.Dropout(dropout)
         self.linear2 = linear2_feedforward_cls(
-            dim_feedforward, d_model, **factory_kwargs)
+            dim_feedforward, d_model, **factory_kwargs
+        )
 
         self.norm_first = norm_first
         self.dropout1 = nn.Dropout(dropout)
@@ -242,10 +244,12 @@ class TransformerEncoderLayer(nn.Module):
         norm1 = layer_norm_cls(d_model, eps=layer_norm_eps, **factory_kwargs)
         if layer_norm_cls == IdentityNorm:
             norm2 = BalancedBasicNorm(
-                d_model, eps=layer_norm_eps, **factory_kwargs)
+                d_model, eps=layer_norm_eps, **factory_kwargs
+            )
         else:
             norm2 = layer_norm_cls(
-                d_model, eps=layer_norm_eps, **factory_kwargs)
+                d_model, eps=layer_norm_eps, **factory_kwargs
+            )
 
         if adaptive_layer_norm:
             self.norm1 = AdaptiveLayerNorm(d_model, norm1)
@@ -255,15 +259,16 @@ class TransformerEncoderLayer(nn.Module):
             self.norm2 = norm2
 
     def __setstate__(self, state):
-        super().__setstate__(state)
-
+        super(TransformerEncoderLayer, self).__setstate__(state)
         if not hasattr(self, "activation"):
             self.activation = F.relu
 
-    def forward(self,
-                src: Tensor,
-                src_mask: Optional[Tensor] = None,
-                src_key_padding_mask: Optional[Tensor] = None,) -> Tensor:
+    def forward(
+        self,
+        src: Tensor,
+        src_mask: Optional[Tensor] = None,
+        src_key_padding_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -274,27 +279,33 @@ class TransformerEncoderLayer(nn.Module):
         Shape:
             see the docs in Transformer class.
         """
-
         x, stage_embedding = src, None
         is_src_tuple = False
         if isinstance(src, tuple):
             x, stage_embedding = src
             is_src_tuple = True
 
-        if not src_key_padding_mask is None:
+        if src_key_padding_mask is not None:
             _skpm_dtype = src_key_padding_mask.dtype
-            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
+            if _skpm_dtype != torch.bool and not torch.is_floating_point(
+                src_key_padding_mask
+            ):
                 raise AssertionError(
-                    "only bool and floating types of key_padding_mask are supported")
+                    "only bool and floating types of key_padding_mask are supported"
+                )
 
         if self.norm_first:
-            x = x + self._sa_block(self.norm1(x, stage_embedding),
-                                   src_mask,
-                                   src_key_padding_mask)
+            x = x + self._sa_block(
+                self.norm1(x, stage_embedding),
+                src_mask,
+                src_key_padding_mask,
+            )
             x = x + self._ff_block(self.norm2(x, stage_embedding))
         else:
             x = self.norm1(
-                x + self._sa_block(x, src_mask, src_key_padding_mask), stage_embedding)
+                x + self._sa_block(x, src_mask, src_key_padding_mask),
+                stage_embedding,
+            )
             x = self.norm2(x + self._ff_block(x), stage_embedding)
 
         if is_src_tuple:
@@ -302,15 +313,20 @@ class TransformerEncoderLayer(nn.Module):
         return x
 
     # self-attention block
-    def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor],
-                  key_padding_mask: Optional[Tensor]):
-        x = self.self_attn(x,
-                           x,
-                           x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           need_weights=False)[0]
+    def _sa_block(
+        self,
+        x: Tensor,
+        attn_mask: Optional[Tensor],
+        key_padding_mask: Optional[Tensor],
+    ) -> Tensor:
+        x = self.self_attn(
+            x,
+            x,
+            x,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )[0]
         return self.dropout1(x)
 
     # feed forward block
@@ -339,21 +355,19 @@ class TransformerEncoder(nn.Module):
     """
     __constants__ = ["norm"]
 
-    def __init__(self,
-                 encoder_layer,
-                 num_layers,
-                 norm=None):
-        super().__init__()
-
+    def __init__(self, encoder_layer, num_layers, norm=None):
+        super(TransformerEncoder, self).__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self,
-                src: Tensor,
-                mask: Optional[Tensor] = None,
-                src_key_padding_mask: Optional[Tensor] = None,
-                return_layer_states: bool = False,) -> Tensor:
+    def forward(
+        self,
+        src: Tensor,
+        mask: Optional[Tensor] = None,
+        src_key_padding_mask: Optional[Tensor] = None,
+        return_layer_states: bool = False,
+    ) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -365,46 +379,58 @@ class TransformerEncoder(nn.Module):
         Shape:
             see the docs in Transformer class.
         """
-
         if return_layer_states:
             layer_states = []  # layers' output
             output = src
             for mod in self.layers:
-                output = mod(output,
-                             src_mask=mask,
-                             src_key_padding_mask=src_key_padding_mask)
+                output = mod(
+                    output,
+                    src_mask=mask,
+                    src_key_padding_mask=src_key_padding_mask,
+                )
                 layer_states.append(output[0])
 
-            if not self.norm is None:
+            if self.norm is not None:
                 output = self.norm(output)
 
             return layer_states, output
+
+        output = src
+        for mod in self.layers:
+            output = mod(
+                output, src_mask=mask, src_key_padding_mask=src_key_padding_mask
+            )
+
+        if self.norm is not None:
+            output = self.norm(output)
+
+        return output
 
 
 class TransformerDecoderLayer(nn.Module):
     __constants__ = ["batch_first", "norm_first"]
 
-    def __init__(self,
-                 d_model: int,
-                 nhead: int,
-                 dim_feedforward: int = 2048,
-                 dropout: float = 0.1,
-                 activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
-                 linear1_self_attention_cls: nn.Module = nn.Linear,
-                 linear2_self_attention_cls: nn.Module = nn.Linear,
-                 linear1_feedforward_cls: nn.Module = nn.Linear,
-                 linear2_feedforward_cls: nn.Module = nn.Linear,
-                 batch_first: bool = False,
-                 norm_first: bool = False,
-                 device=None,
-                 dtype=None,
-                 layer_norm_cls: nn.Module = LayerNorm,
-                 layer_norm_eps: float = 1e-5,
-                 adaptive_layer_norm=False,
-                 ) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        linear1_self_attention_cls: nn.Module = nn.Linear,
+        linear2_self_attention_cls: nn.Module = nn.Linear,
+        linear1_feedforward_cls: nn.Module = nn.Linear,
+        linear2_feedforward_cls: nn.Module = nn.Linear,
+        batch_first: bool = False,
+        norm_first: bool = False,
+        device=None,
+        dtype=None,
+        layer_norm_cls: nn.Module = LayerNorm,
+        layer_norm_eps: float = 1e-5,
+        adaptive_layer_norm=False,
+    ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
-        super().__init__()
-
+        super(TransformerDecoderLayer, self).__init__()
         self.self_attn = MultiheadAttention(
             d_model,
             nhead,
@@ -412,7 +438,7 @@ class TransformerDecoderLayer(nn.Module):
             batch_first=batch_first,
             linear1_cls=linear1_self_attention_cls,
             linear2_cls=linear2_self_attention_cls,
-            **factory_kwargs
+            **factory_kwargs,
         )
         self.multihead_attn = MultiheadAttention(
             d_model,
@@ -421,14 +447,16 @@ class TransformerDecoderLayer(nn.Module):
             batch_first=batch_first,
             linear1_cls=linear1_self_attention_cls,
             linear2_cls=linear2_self_attention_cls,
-            **factory_kwargs
+            **factory_kwargs,
         )
         # Implementation of Feedforward model
         self.linear1 = linear1_feedforward_cls(
-            d_model, dim_feedforward, **factory_kwargs)
+            d_model, dim_feedforward, **factory_kwargs
+        )
         self.dropout = nn.Dropout(dropout)
         self.linear2 = linear2_feedforward_cls(
-            dim_feedforward, d_model, **factory_kwargs)
+            dim_feedforward, d_model, **factory_kwargs
+        )
 
         self.norm_first = norm_first
         self.dropout1 = nn.Dropout(dropout)
@@ -447,33 +475,43 @@ class TransformerDecoderLayer(nn.Module):
 
         if adaptive_layer_norm:
             norm1 = layer_norm_cls(
-                d_model, eps=layer_norm_eps, **factory_kwargs)
+                d_model, eps=layer_norm_eps, **factory_kwargs
+            )
             norm2 = layer_norm_cls(
-                d_model, eps=layer_norm_eps, **factory_kwargs)
+                d_model, eps=layer_norm_eps, **factory_kwargs
+            )
             norm3 = layer_norm_cls(
-                d_model, eps=layer_norm_eps, **factory_kwargs)
+                d_model, eps=layer_norm_eps, **factory_kwargs
+            )
+
             self.norm1 = AdaptiveLayerNorm(d_model, norm1)
             self.norm2 = AdaptiveLayerNorm(d_model, norm2)
             self.norm3 = AdaptiveLayerNorm(d_model, norm3)
         else:
             self.norm1 = layer_norm_cls(
-                d_model, eps=layer_norm_eps, **factory_kwargs)
+                d_model, eps=layer_norm_eps, **factory_kwargs
+            )
             self.norm2 = layer_norm_cls(
-                d_model, eps=layer_norm_eps, **factory_kwargs)
-
+                d_model, eps=layer_norm_eps, **factory_kwargs
+            )
             if layer_norm_cls == IdentityNorm:
-                self.norm3 = BalancedDoubleSwish(
-                    d_model, eps=layer_norm_eps, **factory_kwargs)
+                self.norm3 = BalancedBasicNorm(
+                    d_model, eps=layer_norm_eps, **factory_kwargs
+                )
             else:
                 self.norm3 = layer_norm_cls(
-                    d_model, eps=layer_norm_eps, **factory_kwargs)
+                    d_model, eps=layer_norm_eps, **factory_kwargs
+                )
 
-    def forward(self, tgt: Tensor,
-                memory: Tensor,
-                tgt_mask: Optional[Tensor] = None,
-                memory_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None,) -> Tensor:
+    def forward(
+        self,
+        tgt: Tensor,
+        memory: Tensor,
+        tgt_mask: Optional[Tensor] = None,
+        memory_mask: Optional[Tensor] = None,
+        tgt_key_padding_mask: Optional[Tensor] = None,
+        memory_key_padding_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
@@ -495,16 +533,28 @@ class TransformerDecoderLayer(nn.Module):
             x, stage_embedding = tgt, None
 
         if self.norm_first:
-            x = x + self._sa_block(self.norm1(x, stage_embedding),
-                                   tgt_mask, tgt_key_padding_mask)
-            x = x + self._mha_block(self.norm2(x, stage_embedding),
-                                    memory, memory_mask, memory_key_padding_mask)
+            x = x + self._sa_block(
+                self.norm1(x, stage_embedding), tgt_mask, tgt_key_padding_mask
+            )
+            x = x + self._mha_block(
+                self.norm2(x, stage_embedding),
+                memory,
+                memory_mask,
+                memory_key_padding_mask,
+            )
             x = x + self._ff_block(self.norm3(x, stage_embedding))
         else:
-            x = self.norm1(x + self._sa_block(x, tgt_mask,
-                           tgt_key_padding_mask), stage_embedding)
-            x = self.norm2(x + self._mha_block(x, memory, memory_mask,
-                           memory_key_padding_mask), stage_embedding)
+            x = self.norm1(
+                x + self._sa_block(x, tgt_mask, tgt_key_padding_mask),
+                stage_embedding,
+            )
+            x = self.norm2(
+                x
+                + self._mha_block(
+                    x, memory, memory_mask, memory_key_padding_mask
+                ),
+                stage_embedding,
+            )
             x = self.norm3(x + self._ff_block(x), stage_embedding)
 
         if tgt_is_tuple:
@@ -512,28 +562,38 @@ class TransformerDecoderLayer(nn.Module):
         return x
 
     # self-attention block
-    def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor],
-                  key_padding_mask: Optional[Tensor]) -> Tensor:
-        x = self.self_attn(x,
-                           x,
-                           x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           need_weights=False)[0]
+    def _sa_block(
+        self,
+        x: Tensor,
+        attn_mask: Optional[Tensor],
+        key_padding_mask: Optional[Tensor],
+    ) -> Tensor:
+        x = self.self_attn(
+            x,
+            x,
+            x,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )[0]
         return self.dropout1(x)
 
     # multihead attention block
-    def _mha_block(self, x: Tensor,
-                   mem: Tensor,
-                   attn_mask: Optional[Tensor],
-                   key_padding_mask: Optional[Tensor]) -> Tensor:
-        x = self.multihead_attn(x,
-                                mem,
-                                mem,
-                                attn_mask=attn_mask,
-                                key_padding_mask=key_padding_mask,
-                                need_weights=False)[0]
+    def _mha_block(
+        self,
+        x: Tensor,
+        mem: Tensor,
+        attn_mask: Optional[Tensor],
+        key_padding_mask: Optional[Tensor],
+    ) -> Tensor:
+        x = self.multihead_attn(
+            x,
+            mem,
+            mem,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )[0]
         return self.dropout2(x)
 
     # feed forward block
@@ -552,4 +612,6 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
     elif activation == "gelu":
         return F.gelu
 
-    raise RuntimeError(f"activation should be relu/gelu, not {activation}")
+    raise RuntimeError(
+        "activation should be relu/gelu, not {}".format(activation)
+    )

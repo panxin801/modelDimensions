@@ -581,7 +581,7 @@ class SRLinear(nn.Linear):
         return weight
 
     def forward(self, x):
-        return nn.functional.linear(x, self.get_weight(), self.bias)
+        return F.linear(x, self.get_weight(), self.bias)
 
 
 class SRConv1d(SRLinear):
@@ -607,9 +607,7 @@ class SRConv1d(SRLinear):
         weight = self.get_weight().view(
             self.out_features, in_features, self.kernel_size
         )
-        return nn.functional.conv1d(
-            x, weight, bias=self.bias, stride=self.stride, padding=self.padding
-        )
+        return F.conv1d(x, weight, bias=self.bias, stride=self.stride, padding=self.padding)
 
 
 def TransposeSRConv1d(

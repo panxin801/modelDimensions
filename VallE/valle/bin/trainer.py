@@ -25,7 +25,6 @@ python3 bin/trainer.py \
     --exp-dir exp/valle
     --dtype "bfloat16" \
 """
-
 import argparse
 import copy
 import logging
@@ -657,7 +656,7 @@ def train_one_epoch(
         batch_size = len(batch["text"])
 
         try:
-            with torch.amp.autocast(enabled=enabled, dtype=dtype):
+            with torch.amp.autocast(enabled=enabled, dtype=dtype, device_type="cuda"):
                 _, loss, loss_info = compute_loss(params=params,
                                                   model=model,
                                                   batch=batch,
@@ -776,7 +775,7 @@ def train_one_epoch(
             # Calculate validation loss in Rank 0
             model.eval()
             logging.info("Computing validation loss")
-            with torch.amp.autocast(dtype=dtype):
+            with torch.amp.autocast(dtype=dtype, device_type="cuda"):
                 valid_info = compute_validation_loss(
                     params=params,
                     model=model,
@@ -874,7 +873,7 @@ def run(rank, world_size, args):
         print(model, file=f)
 
     num_param = sum([p.numel() for p in model.parameters()])
-    logging.info(f"Number of model parameters: {num_param}")
+    logging.info(f"Number of model parameters: {num_param:,}")
 
     # Model average
     assert params.save_every_n >= params.average_period
@@ -983,7 +982,7 @@ def run(rank, world_size, args):
         logging.info("Loading grad scaler state dict")
         scaler.load_state_dict(checkpoints["grad_scaler"])
 
-    for epoch in range(params.start_epoch, params.num_epoch + 1):
+    for epoch in range(params.start_epoch, params.num_epochs + 1):
         if isinstance(scheduler, Eden):
             scheduler.step_epoch(epoch - 1)
 
@@ -1065,7 +1064,7 @@ def scan_pessimistic_batches_for_oom(
     for criterion, cuts in batches.items():
         batch = train_dl.dataset[cuts]
         try:
-            with torch.amp.autocast(dtype=dtype):
+            with torch.amp.autocast(dtype=dtype, device_type="cuda"):
                 _, loss, _ = compute_loss(
                     params=params,
                     model=model,

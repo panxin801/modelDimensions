@@ -1,7 +1,9 @@
 icefall
 egs/bznsyp/data
+egs/bznsyp/databak
 egs/bznsyp/download
 .vscode
 __pycache__
 
 exp
+data

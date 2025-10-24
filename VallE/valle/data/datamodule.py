@@ -316,10 +316,10 @@ class TtsDataModule:
             logging.info("Using DynamicBucketingSampler")
             train_sampler = DynamicBucketingSampler(
                 cuts_train,
-                max_duration=self.args.max_duration,
-                shuffle=self.args.shuffle,
-                buffer_size=self.args.buffer_size,
-                shuffle_buffer_size=self.args.shuffle_buffer_size,
+                max_duration=self.args.max_duration,  # 20
+                shuffle=self.args.shuffle,  # True
+                buffer_size=self.args.buffer_size,  # 40000
+                shuffle_buffer_size=self.args.shuffle_buffer_size,  # 100000
                 quadratic_duration=10,
                 num_cuts_for_bins_estimate=10000,
                 drop_last=True,
