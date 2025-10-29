@@ -181,13 +181,13 @@ class TransformerEncoderLayer(nn.Module):
 
     def __init__(
         self,
-        d_model: int,
-        nhead: int,
-        dim_feedforward: int = 2048,
+        d_model: int,  # 1024
+        nhead: int,  # 16
+        dim_feedforward: int = 2048,  # 4096
         dropout: float = 0.1,
         activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
-        batch_first: bool = False,
-        norm_first: bool = False,
+        batch_first: bool = False,  # True
+        norm_first: bool = False,  # True
         device=None,
         dtype=None,
         linear1_self_attention_cls: nn.Module = nn.Linear,
@@ -196,15 +196,15 @@ class TransformerEncoderLayer(nn.Module):
         linear2_feedforward_cls: nn.Module = nn.Linear,
         layer_norm_cls: nn.Module = LayerNorm,
         layer_norm_eps: float = 1e-5,
-        adaptive_layer_norm=False,
+        adaptive_layer_norm=False,  # True for ar decoder, False for nar decoder
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super(TransformerEncoderLayer, self).__init__()
         self.self_attn = MultiheadAttention(
-            d_model,
-            nhead,
-            dropout=dropout,
-            batch_first=batch_first,
+            d_model,  # 1024
+            nhead,  # 16
+            dropout=dropout,  # 0.1
+            batch_first=batch_first,  # True
             linear1_cls=linear1_self_attention_cls,
             linear2_cls=linear2_self_attention_cls,
             **factory_kwargs,
@@ -213,11 +213,11 @@ class TransformerEncoderLayer(nn.Module):
         # Implementation of Feedforward model
         self.linear1 = linear1_feedforward_cls(
             d_model, dim_feedforward, **factory_kwargs
-        )
+        )  # in 1024, out 4096
         self.dropout = nn.Dropout(dropout)
         self.linear2 = linear2_feedforward_cls(
             dim_feedforward, d_model, **factory_kwargs
-        )
+        )  # in 4096, out 1024
 
         self.norm_first = norm_first
         self.dropout1 = nn.Dropout(dropout)
@@ -241,7 +241,8 @@ class TransformerEncoderLayer(nn.Module):
         #     self.activation_relu_or_gelu = 0
         self.activation = activation
 
-        norm1 = layer_norm_cls(d_model, eps=layer_norm_eps, **factory_kwargs)
+        norm1 = layer_norm_cls(d_model, eps=layer_norm_eps,
+                               **factory_kwargs)  # 1024, 1e-5
         if layer_norm_cls == IdentityNorm:
             norm2 = BalancedBasicNorm(
                 d_model, eps=layer_norm_eps, **factory_kwargs
@@ -251,12 +252,12 @@ class TransformerEncoderLayer(nn.Module):
                 d_model, eps=layer_norm_eps, **factory_kwargs
             )
 
-        if adaptive_layer_norm:
+        if adaptive_layer_norm:  # False for ar decoder, True for nar decoder
             self.norm1 = AdaptiveLayerNorm(d_model, norm1)
             self.norm2 = AdaptiveLayerNorm(d_model, norm2)
         else:
-            self.norm1 = norm1
-            self.norm2 = norm2
+            self.norm1 = norm1  # LayerNorm
+            self.norm2 = norm2  # LayerNorm
 
     def __setstate__(self, state):
         super(TransformerEncoderLayer, self).__setstate__(state)
@@ -357,9 +358,10 @@ class TransformerEncoder(nn.Module):
 
     def __init__(self, encoder_layer, num_layers, norm=None):
         super(TransformerEncoder, self).__init__()
+        # TransformerEncoderLayer, 12
         self.layers = _get_clones(encoder_layer, num_layers)
-        self.num_layers = num_layers
-        self.norm = norm
+        self.num_layers = num_layers  # 12
+        self.norm = norm  # LayerNorm
 
     def forward(
         self,

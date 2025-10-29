@@ -34,13 +34,13 @@ class TextTokenCollater:
         self.pad_symbol = pad_symbol
         self.bos_symbol = bos_symbol
         self.eos_symbol = eos_symbol
-        self.add_eos = add_eos
-        self.add_bos = add_bos
+        self.add_eos = add_eos  # True
+        self.add_bos = add_bos  # True
 
         unique_tokens = ([pad_symbol] +
                          ([bos_symbol] if add_bos else []) +
                          ([eos_symbol] if add_eos else []) +
-                         sorted(text_tokens))
+                         sorted(text_tokens))  # len(unique_tokens)=176=173+3
 
         self.token2idx = {token: idx for idx, token in enumerate(unique_tokens)}
         self.idx2token = [token for token in unique_tokens]
@@ -56,10 +56,11 @@ class TextTokenCollater:
 
         tokens_batch = torch.from_numpy(np.array([[self.token2idx[token] for token in seq] for seq in seqs],
                                                  dtype=np.int64)
-                                        )
+                                        )  # [B, max_len]
         tokens_lens = torch.IntTensor(
-            [len(seq) + int(self.add_eos) + int(self.add_bos) for seq in tokens_seqs])
+            [len(seq) + int(self.add_eos) + int(self.add_bos) for seq in tokens_seqs])  # [B]
 
+        # tokens fo texts, true lens if each texts
         return tokens_batch, tokens_lens
 
     def index(
@@ -95,8 +96,9 @@ class TextTokenCollater:
 
 
 def get_text_token_collater(text_tokens_file: str) -> TextTokenCollater:
-    text_tokens_path = Path(text_tokens_file)
-    unique_tokens = SymbolTable.from_file(text_tokens_path)
+    text_tokens_path = Path(text_tokens_file)  # unique_text_tokens.k2symbols
+    unique_tokens = SymbolTable.from_file(
+        text_tokens_path)  # len(unique_tokens.ids)=173
     collater = TextTokenCollater(
         unique_tokens.symbols, add_bos=True, add_eos=True
     )

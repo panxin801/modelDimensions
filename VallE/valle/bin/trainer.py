@@ -512,12 +512,13 @@ def compute_loss(
         else next(model.parameters()).device
     )
     # at entry, TextTokens is (N, P)
-    text_tokens = batch["text_tokens"].to(device)
-    text_tokens_lens = batch["text_tokens_lens"].to(device)
+    text_tokens = batch["text_tokens"].to(device)  # [B, maxlen_text tokens]
+    text_tokens_lens = batch["text_tokens_lens"].to(device)  # [B]
     assert text_tokens.ndim == 2
 
+    # [B, maxlen_frames, num_quantizers], audio tokens or fbanks
     audio_features = batch["audio_features"].to(device)
-    audio_features_lens = batch["audio_features_lens"].to(device)
+    audio_features_lens = batch["audio_features_lens"].to(device)  # [B]
     assert audio_features.ndim == 3
 
     with torch.set_grad_enabled(is_training):
@@ -528,6 +529,7 @@ def compute_loss(
             y_lens=audio_features_lens,
             train_stage=params.train_stage,
         )
+    # when  arams.train_stage==1, predicts[0] is text tokens [B, maxlen_text, 1024], predicts[1] is audio tokens [B, maxlen_frames, num_quantizers]
 
     assert loss.requires_grad == is_training
 
@@ -859,7 +861,9 @@ def run(rank, world_size, args):
     if torch.cuda.is_available():
         device = torch.device("cuda", rank)
         # https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
+        # 允许在nvidia ampere 架构上cudnn使用tf32进行卷积操作。提高性能
         torch.backends.cudnn.allow_tf32 = True
+        # 允许在nvidia ampere 架构上cuda使用tf32进行矩阵乘法操作。提高性能
         torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info(f"Device: {device}")
@@ -977,7 +981,7 @@ def run(rank, world_size, args):
         )
 
     scaler = GradScaler(enabled=params.dtype in [
-        "float16", "fp16"], init_scale=1.0)
+        "float16", "fp16"], init_scale=1.0)  # not enabled
     if checkpoints and "grad_scaler" in checkpoints:
         logging.info("Loading grad scaler state dict")
         scaler.load_state_dict(checkpoints["grad_scaler"])

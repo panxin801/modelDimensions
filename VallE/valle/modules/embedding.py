@@ -47,10 +47,10 @@ class TokenEmbedding(nn.Module):
 
 class SinePositionalEmbedding(nn.Module):
     def __init__(self,
-                 dim_model: int,
-                 dropout: float = 0.0,
-                 scale: bool = False,
-                 alpha: bool = False):
+                 dim_model: int,  # 1024
+                 dropout: float = 0.0,  # 0.1
+                 scale: bool = False,  # False
+                 alpha: bool = False):  # True for AR, False for NAR
 
         super().__init__()
 
@@ -65,6 +65,7 @@ class SinePositionalEmbedding(nn.Module):
 
     def extend_pe(self, x):
         """Reset the positional encodings.
+            Args: x:[1,4000]
         """
 
         if not self.pe is None:
@@ -72,7 +73,7 @@ class SinePositionalEmbedding(nn.Module):
                 if self.pe.dtype != x.dtype or self.pe.device != x.device:
                     self.pe = self.pe.to(dtype=x.dtype, device=x.device)
                 return
-        pe = torch.zeros(x.size(1), self.dim_model)
+        pe = torch.zeros(x.size(1), self.dim_model)  # [4000,1024]
         if self.reverse:
             position = torch.arange(
                 x.size(1) - 1, -1, -1.0, dtype=torch.float32
@@ -80,20 +81,22 @@ class SinePositionalEmbedding(nn.Module):
         else:
             position = torch.arange(
                 0, x.size(1), dtype=torch.float32
-            ).unsqueeze(1)
+            ).unsqueeze(1)  # [x.size(1),1]=[4000,1]
         div_term = torch.exp(
             torch.arange(0, self.dim_model, 2, dtype=torch.float32)
             * -(math.log(10000.0) / self.dim_model)
-        )
+        )  # [self.dim_model//2]=[512]
+        # [x.size(1),self.dim_model//2]=[4000,512],处理的是偶数位置
         pe[:, 0::2] = torch.sin(position * div_term)
+        # [x.size(1),self.dim_model//2]=[4000,512],处理的是奇数位置
         pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)
+        pe = pe.unsqueeze(0)  # [1,x.size(1),self.dim_model]=[1,4000,1024]
         self.pe = pe.to(device=x.device, dtype=x.dtype).detach()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """ Args: x
+        """ Args: x text or audio tokens [B, len, D]
         Return:
-            output
+            output: tokens with positional encoding [B, len, D]
         """
         self.extend_pe(x)
 

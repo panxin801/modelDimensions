@@ -78,6 +78,7 @@ class SpeechSynthesisDataset(torch.utils.data.Dataset):
             audio, audio_lens = None, None
 
         audio_features, audio_features_lens = self.feature_input_strategy(cuts)
+        # [B,Frames, 8(num_quantizers)], [B] saved frames for each audio
 
         for transform in self.feature_transforms:
             audio_features = transform(audio_features)
@@ -87,12 +88,12 @@ class SpeechSynthesisDataset(torch.utils.data.Dataset):
 
         return {"utt_id": [cut.id for cut in cuts],
                 "text": [cut.supervisions[0].text for cut in cuts],
-                "audio": audio,
-                "audio_lens": audio_lens,
-                "audio_features": audio_features,
-                "audio_features_lens": audio_features_lens,
-                "text_tokens": text_tokens,
-                "text_tokens_lens": text_tokens_lens, }
+                "audio": audio,  # None
+                "audio_lens": audio_lens,  # None
+                "audio_features": audio_features,  # [B, max_frames, 8]
+                "audio_features_lens": audio_features_lens,  # [B]
+                "text_tokens": text_tokens,  # [B, max_tokens]
+                "text_tokens_lens": text_tokens_lens, }  # [b]
 
 
 def validate_for_tts(cuts: CutSet) -> None:

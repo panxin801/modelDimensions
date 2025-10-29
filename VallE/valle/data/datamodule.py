@@ -304,6 +304,7 @@ class TtsDataModule:
             )
         else:
             train = SpeechSynthesisDataset(
+                # unique_text_tokens.k2symbols
                 get_text_token_collater(self.args.text_tokens),
                 feature_input_strategy=_get_input_strategy(
                     self.args.input_strategy, self.args.dataset, cuts_train

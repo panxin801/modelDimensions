@@ -88,12 +88,14 @@ class VALLF(nn.Module):
         # ID NUM_AUDIO_TOKENS=1024
         # ID NUM_AUDIO_TOKENS     -> PAD
         # ID NUM_AUDIO_TOKENS + 1 -> BOS
-        self.ar_audio_prepend_bos = prepend_bos  # False
+
+        # whether prepend <BOS> to the acoustic tokens
+        self.ar_audio_prepend_bos = prepend_bos  # False=0,
         self.ar_audio_embedding = TokenEmbedding(
-            d_model, NUM_AUDIO_TOKENS + 1 + int(prepend_bos))
+            d_model, NUM_AUDIO_TOKENS + 1 + int(prepend_bos))  # 1024, 1025
 
         # PreNet
-        if add_prenet:
+        if add_prenet:  # false
             self.ar_text_prenet = nn.Sequential(
                 Transpose(),
                 nn.Conv1d(d_model, d_model, kernel_size=5, padding="same"),
@@ -125,7 +127,7 @@ class VALLF(nn.Module):
             self.ar_text_prenet = nn.Identity()
             self.ar_audio_prenet = nn.Identity()
 
-        self.ar_text_position = SinePositionalEmbedding(d_model,
+        self.ar_text_position = SinePositionalEmbedding(d_model,  # 1024
                                                         dropout=0.1,
                                                         scale=False,
                                                         alpha=True)
@@ -134,18 +136,18 @@ class VALLF(nn.Module):
                                                          scale=False,
                                                          alpha=True)
 
-        self.ar_decoder = decoder_cls(
-            decoder_layer_cls(d_model,
-                              nhead,
-                              dim_feedforward=d_model * 4,
+        self.ar_decoder = decoder_cls(  # TransformerEncoder
+            decoder_layer_cls(d_model,  # TransformerEncoderLayer, 1024
+                              nhead,  # 16
+                              dim_feedforward=d_model * 4,  # 1024*4=4096
                               dropout=0.1,
                               batch_first=True,
-                              norm_first=norm_first),
-            num_layers=num_layers,
+                              norm_first=norm_first),  # True
+            num_layers=num_layers,  # 12
             norm=LayerNorm(d_model) if norm_first else None,
         )
         self.ar_predict_layer = nn.Linear(
-            d_model, NUM_AUDIO_TOKENS + 1, bias=False)
+            d_model, NUM_AUDIO_TOKENS + 1, bias=False)  # 1024, 1025
 
         self.ar_accuracy_metric = MulticlassAccuracy(
             NUM_AUDIO_TOKENS + 1,
@@ -156,9 +158,9 @@ class VALLF(nn.Module):
         )
 
         self.rng = random.Random(0)
-        self.num_heads = nhead
-        self.prefix_mode = prefix_mode
-        self.num_quantizers = num_quantizers
+        self.num_heads = nhead  # 16
+        self.prefix_mode = prefix_mode  # 1
+        self.num_quantizers = num_quantizers  # 8
 
         assert num_quantizers >= 1
         if num_quantizers > 1:
@@ -167,7 +169,7 @@ class VALLF(nn.Module):
                 [TokenEmbedding(nar_d_model, NUM_AUDIO_TOKENS) for i in range(num_quantizers - 1)])  # W_a
 
             # Prenet
-            if add_prenet:
+            if add_prenet:  # False
                 self.nar_text_prenet = nn.Sequential(
                     Transpose(),
                     nn.Conv1d(nar_d_model, nar_d_model,
@@ -210,16 +212,16 @@ class VALLF(nn.Module):
                                                               scale=False,
                                                               alpha=False)
 
-            self.nar_decoder = decoder_cls(decoder_layer_cls(nar_d_model,
+            self.nar_decoder = decoder_cls(decoder_layer_cls(nar_d_model,  # 1024
                                                              int(nhead *
-                                                                 nar_scale_factor),
-                                                             dim_feedforward=nar_d_model * 4,
+                                                                 nar_scale_factor),  # 16
+                                                             dim_feedforward=nar_d_model * 4,  # 4096
                                                              dropout=0.1,
                                                              batch_first=True,
-                                                             norm_first=norm_first,
+                                                             norm_first=norm_first,  # True
                                                              adaptive_layer_norm=True),
                                            num_layers=int(
-                                               num_layers * nar_scale_factor),
+                                               num_layers * nar_scale_factor),  # 12
                                            norm=AdaptiveLayerNorm(
                                                nar_d_model, norm=nn.LayerNorm(
                                                    nar_d_model) if norm_first else None)
@@ -229,14 +231,14 @@ class VALLF(nn.Module):
             self.nar_stage_embeddings = nn.ModuleList(
                 [TokenEmbedding(nar_d_model, 1) for i in range(num_quantizers - 1)])
 
-            if share_embedding:
+            if share_embedding:  # True
                 # We share the parameters of the output projection layer with the parameters of the acoustic embedding Wa
                 # NOTE(Feiteng): In the experiment, this undermines accuracy
                 # self.ar_predict_layer.weight = self.ar_audio_embedding.weight
 
                 # We also share the parameters of the acoustic embedding layer and the output prediction layer,
                 # which means the weights of the j-th prediction layer are the same as the (j + 1)-th acoustic embedding layer.
-                for j in range(0, num_quantizers - 2):
+                for j in range(0, num_quantizers - 2):  # [0:6]
                     self.nar_predict_layers[
                         j
                     ].weight = self.nar_audio_embeddings[j + 2].weight
@@ -275,8 +277,15 @@ class VALLF(nn.Module):
                     yield pair
 
     def pad_y_eos(self, y, y_mask_int, eos_id):
+        """ Args:
+            y: audio tokens [B, maxlen_audio_tokens]
+            y_mask_int: audio tokens mask [B, maxlen_audio_tokens], 1 for padding, 0 for true
+            Return:
+            targets[:, :-1]: codes->[0, maxlen_audio_tokens]
+            targets[:, 1:]: codes -> [1,maxlen_audio_tokens+1]
+        """
         targets = F.pad(y, (0, 1), value=0) + eos_id * \
-            F.pad(y_mask_int, (0, 1), value=1)
+            F.pad(y_mask_int, (0, 1), value=1)  # [B, maxlen_audio_tokens+1]
         # inputs, targets
         if self.ar_audio_prepend_bos:
             return (F.pad(targets[:, :-1], (1, 0), value=NUM_AUDIO_TOKENS + 1), targets)
@@ -634,15 +643,15 @@ class VALLE(VALLF):
     """
 
     def __init__(self,
-                 d_model: int,
-                 nhead: int,
-                 num_layers: int,
+                 d_model: int,  # 1024
+                 nhead: int,  # 16
+                 num_layers: int,  # 12
                  norm_first: bool = True,
                  add_prenet: bool = False,
-                 prefix_mode: int = 0,
+                 prefix_mode: int = 0,  # 1
                  share_embedding: bool = True,
                  nar_scale_factor: float = 1.0,
-                 **kwargs,
+                 **kwargs,  # {'prepend_bos': False, 'num_quantizers': 8}
                  ):
         """
         Args:
@@ -654,17 +663,17 @@ class VALLE(VALLF):
             The number of sub-decoder-layers in the decoder (required).
         """
 
-        super().__init__(d_model,
-                         nhead,
-                         num_layers,
-                         norm_first=norm_first,
-                         add_prenet=add_prenet,
+        super().__init__(d_model,  # 1024
+                         nhead,  # 16
+                         num_layers,  # 12
+                         norm_first=norm_first,  # True
+                         add_prenet=add_prenet,  # False
                          decoder_cls=TransformerEncoder,
                          decoder_layer_cls=TransformerEncoderLayer,
-                         prefix_mode=prefix_mode,
-                         share_embedding=share_embedding,
-                         nar_scale_factor=nar_scale_factor,
-                         **kwargs)
+                         prefix_mode=prefix_mode,  # 1
+                         share_embedding=share_embedding,  # True
+                         nar_scale_factor=nar_scale_factor,  # 1.0
+                         **kwargs)  # {'prepend_bos': False, 'num_quantizers': 8}
 
     def forward(self,
                 x: torch.Tensor,
@@ -677,11 +686,11 @@ class VALLE(VALLF):
         """
         Args:
           x:
-            A 2-D tensor of shape (N, S).
+            A 2-D tensor of shape (N, S). text tokens 
           x_lens:
             A 1-D tensor of shape (N,). It contains the number of tokens in `x`
             before padding.
-          y:
+          y: audio tokens or fbanks
             A 3-D tensor of shape (N, T, 8).
           y_lens:
             A 1-D tensor of shape (N,). It contains the number of tokens in `x`
@@ -706,24 +715,23 @@ class VALLE(VALLF):
         assert y_lens.ndim == 1, y_lens.shape
 
         # NOTE: x has been padded in TextTokenCollater
-        x_mask = make_pad_mask(x_lens).to(x.device)
-        y_mask = make_pad_mask(y_lens).to(y.device)
+        x_mask = make_pad_mask(x_lens).to(x.device)  # [B, max_text_token_len]
+        y_mask = make_pad_mask(y_lens).to(y.device)  # [B, max_audio_token_len]
         y_mask_int = y_mask.type(torch.long)
 
-        text = x
-        # x = self.ar_text_embedding(text)
-        # x = self.ar_text_prenet(x)
-        # x = self.ar_text_position(x) this is different from VallF
+        text = x  # [B, max_text_token_len], text tokens
 
-        codes = y.type(torch.long) * (1 - y_mask_int.unsqueeze(dim=-1))
+        codes = y.type(torch.long) * \
+            (1 - y_mask_int.unsqueeze(dim=-1))  # pad codes set to 0, audio tokens
 
         # Training
         # AR Decoder
         y, targets = self.pad_y_eos(
-            codes[..., 0], y_mask_int, eos_id=NUM_AUDIO_TOKENS)
+            codes[..., 0], y_mask_int, eos_id=NUM_AUDIO_TOKENS)  # codes[..., 0]=codes[:,:,0], input codes from quantizer 0
         x_len = x_lens.max()
 
         total_loss, metrics = 0.0, {}
+        # [B, max_text_token_len+max_audio_token_len]
         xy_padding_mask = torch.concat([x_mask, y_mask], dim=1)
         if self.ar_audio_prepend_bos:
             ar_xy_padding_mask = torch.concat(
@@ -732,64 +740,50 @@ class VALLE(VALLF):
             ar_xy_padding_mask = xy_padding_mask
 
         if train_stage in [0, 1]:
-            # y_emb = self.ar_audio_embedding(y)
-            # y_emb = self.ar_audio_prenet(y_emb)
-            # y_pos = self.ar_audio_position(y_emb) different from VallF
-
-            # ar_y_mask = y_mask
-            # if self.ar_audio_prepend_bos:
-            #     ar_y_mask = F.pad(y_mask, (1, 0), value=False)
-            # y_len = y_lens.max() + int(self.ar_audio_prepend_bos)
-
-            # tgt_mask = torch.triu(torch.ones(y_len, y_len, device=y.device, dtype=torch.bool),
-            #                       diagonal=1,)
-            # y_dec, _ = self.ar_decoder((y_pos, None),
-            #                            x,
-            #                            tgt_mask=tgt_mask,
-            #                            tgt_key_padding_mask=ar_y_mask,
-            #                            memory_mask=None,
-            #                            memory_key_padding_mask=x_mask)
-            # logits = self.ar_predict_layer(y_dec).permute(0, 2, 1)
-            # # loss
-            # total_loss = F.cross_entropy(logits, targets, reduction=reduction)
-            # metrics["ArTop10Accuracy"] = self.ar_accuracy_metric(
-            #     logits.detach(), targets).item() * y_lens.sum().type(torch.float32)
-
-            x = self.ar_text_embedding(text)
-            x = self.ar_text_prenet(x)
-            x = self.ar_text_position(x)
+            x = self.ar_text_embedding(text)  # [B, max_text_token_len, 1024]
+            x = self.ar_text_prenet(x)  # [B, max_text_token_len, 1024]
+            x = self.ar_text_position(x)  # [B, max_text_token_len, 1024]
 
             y_len = y_lens.max() + int(self.ar_audio_prepend_bos)
             x_attn_mask = F.pad(
                 torch.zeros((x_len, x_len), dtype=torch.bool, device=x.device),
                 (0, y_len),
-                value=True)
+                value=True)  # [x_len, x_len+y_len]
             y_attn_mask = F.pad(
                 torch.triu(torch.ones(y_len, y_len, dtype=torch.bool, device=x.device),
                            diagonal=1),
                 (x_len, 0),
                 value=False
-            )
+            )  # [y_len, x_len+y_len]
+
+            # [x_len+y_len,x_len+y_len]
             xy_attn_mask = torch.concat([x_attn_mask, y_attn_mask], dim=0)
 
             # merge key padding and attention masks
             bsz, src_len = x.shape[0], x_len + y_len
             _xy_padding_mask = (ar_xy_padding_mask.view(bsz, 1, 1, src_len)
                                 .expand(-1, self.num_heads, -1, -1)
-                                .reshape(bsz * self.num_heads, 1, src_len))
+                                .reshape(bsz * self.num_heads, 1, src_len))  # [bsz * self.num_heads, 1,src_len]=[32,1,503]
+            # [bsz * self.num_heads, 1,src_len]=[32,1,503]
             xy_attn_mask = xy_attn_mask.logical_or(_xy_padding_mask)
 
             new_attn_mask = torch.zeros_like(xy_attn_mask, dtype=x.dtype)
-            new_attn_mask.masked_fill_(xy_attn_mask, float("-inf"))
+            new_attn_mask.masked_fill_(xy_attn_mask, float(
+                "-inf"))  # padding value set to -inf
+            # [bsz * self.num_heads, 1,src_len]=[32,1,503]
             xy_attn_mask = new_attn_mask
 
-            y_emb = self.ar_audio_embedding(y)
+            y_emb = self.ar_audio_embedding(y)  # [B, max_audio_token_len, 1024]
             y_emb = self.ar_audio_prenet(y_emb)
             y_pos = self.ar_audio_position(y_emb)
 
+            # [B, max_text_token_len+max_audio_token_len, 1024]=[2,src_len, 1024]
             xy_pos = torch.concat([x, y_pos], dim=1)
-            xy_dec, _ = self.ar_decoder((xy_pos, None), mask=xy_attn_mask)
-            logits = self.ar_predict_layer(xy_dec[:, x_len:]).permute(0, 2, 1)
+            xy_dec, _ = self.ar_decoder(
+                (xy_pos, None), mask=xy_attn_mask)  # [2,src_len, 1024]
+            # xy_dec is predicted audio tokens using to compare with target
+            logits = self.ar_predict_layer(
+                xy_dec[:, x_len:]).permute(0, 2, 1)  # [2, 1025, 430]
             # loss
             total_loss = F.cross_entropy(logits, targets, reduction=reduction)
 
