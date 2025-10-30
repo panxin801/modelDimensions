@@ -285,7 +285,8 @@ class VALLF(nn.Module):
             targets[:, 1:]: codes -> [1,maxlen_audio_tokens+1]
         """
         targets = F.pad(y, (0, 1), value=0) + eos_id * \
-            F.pad(y_mask_int, (0, 1), value=1)  # [B, maxlen_audio_tokens+1]
+            F.pad(y_mask_int, (0, 1),
+                  value=1)  # [B, maxlen_audio_tokens+1], pad eos_id to end of each sample
         # inputs, targets
         if self.ar_audio_prepend_bos:
             return (F.pad(targets[:, :-1], (1, 0), value=NUM_AUDIO_TOKENS + 1), targets)
@@ -301,14 +302,15 @@ class VALLF(nn.Module):
         # from the same utterance.
         # We implement this differently.
         """ Args:
-            y:
-            y_lens:
-            codes:
-            nar_stage:
-            y_prompts_codes:
+            y: audio tokens from quantizer 0  [B, maxlen_audio_tokens]
+            y_lens: [B]
+            codes: Encodec audio full quantizer codes [B, maxlen_audio_tokens, num_quantizers]
+            nar_stage: # int value
+            y_prompts_codes: Maybe None
         Return:
-            y_emb,:
-            prefix_len:
+            y_emb,: prompts tokens [B, maxlen_audio_tokens, 1024], y_prompts|y_embed,
+                y_prompts from full nar layers, y_embed from partial nar layers.
+            prefix_len: random prefix length
         """
         if self.prefix_mode == 0:
             # no prefix
@@ -321,16 +323,22 @@ class VALLF(nn.Module):
             # prefix at begining
             int_low = (0.25 * y_lens.min()).type(torch.int64).item()
             prefix_len = torch.randint(int_low, int_low * 2, size=()).item()
-            prefix_len = min(prefix_len, 225)  # 24000/320 * 3s = 225 frames
+            # 24000/320 * 3s = 225 frames, 183 for this test
+            prefix_len = min(prefix_len, 225)
 
-            y_prompts = self.nar_audio_embeddings[0](y[:, :prefix_len])
+            # input y is a segment of audio token Encodec quantizer 0
+            y_prompts = self.nar_audio_embeddings[0](
+                y[:, :prefix_len])  # [B, prefix_len, 1024]
+            # [B, maxlen_audio_tokens-prefix_len, 1024]
             y_emb = self.nar_audio_embeddings[0](y[:, prefix_len:])
             for j in range(1, self.num_quantizers):
-                y_prompts += self.nar_audio_embeddings[j](
+                y_prompts = y_prompts + self.nar_audio_embeddings[j](
                     codes[:, :prefix_len, j])
+                # y_prompts =  + yTmp
                 if j < nar_stage:
-                    y_emb += self.nar_audio_embeddings[j](
+                    y_emb = y_emb + self.nar_audio_embeddings[j](
                         codes[:, prefix_len:, j])
+            # [B, maxlen_audio_tokens, 1024]
             y_emb = torch.concat([y_prompts, y_emb], axis=1)
         elif self.prefix_mode in [2, 4]:
             if self.prefix_mode == 2:
@@ -699,6 +707,11 @@ class VALLE(VALLF):
             0: AR & NAR modules, 1: AR modules, 2: NAR modules
         Returns:
           Return the predicted audio code matrix, cross-entropy loss and Top-10 accuracy.
+          ----
+          x: text token embedding: [B, max_text_token_len, 1024]
+          codes: [B, max_audio_token_len, num_quantizers] padded audio tokens
+          total_loss: ce_loss
+          metrics: Top-10 accuracy
         """
         assert x.ndim == 2, x.shape
         assert x_lens.ndim == 1, x_lens.shape
@@ -717,6 +730,7 @@ class VALLE(VALLF):
         # NOTE: x has been padded in TextTokenCollater
         x_mask = make_pad_mask(x_lens).to(x.device)  # [B, max_text_token_len]
         y_mask = make_pad_mask(y_lens).to(y.device)  # [B, max_audio_token_len]
+        # True means pad value int(True)=1
         y_mask_int = y_mask.type(torch.long)
 
         text = x  # [B, max_text_token_len], text tokens
@@ -783,7 +797,7 @@ class VALLE(VALLF):
                 (xy_pos, None), mask=xy_attn_mask)  # [2,src_len, 1024]
             # xy_dec is predicted audio tokens using to compare with target
             logits = self.ar_predict_layer(
-                xy_dec[:, x_len:]).permute(0, 2, 1)  # [2, 1025, 430]
+                xy_dec[:, x_len:]).permute(0, 2, 1)  # [2, 1025, 430], AR Transformer decoder in paper
             # loss
             total_loss = F.cross_entropy(logits, targets, reduction=reduction)
 
@@ -798,59 +812,44 @@ class VALLE(VALLF):
             y = y[:, 1:]
 
         if train_stage in [0, 2]:
-            num_nar_layers = self.num_quantizers - 1
+            num_nar_layers = self.num_quantizers - 1  # 8-1
             nar_stage = self.rng.choices([k for k in range(1, self.num_quantizers)],
                                          weights=[1.0 / num_nar_layers] *
                                          num_nar_layers,
-                                         k=1)[0]
+                                         k=1)[0]  # random select input from EnCodec quantizer layer
 
-            x = self.nar_text_embedding(text)
-            x = self.nar_text_prenet(x)
-            x = self.nar_text_position(x)
+            x = self.nar_text_embedding(text)  # [B, max_text_token_len, 1024]
+            x = self.nar_text_prenet(x)  # [B, max_text_token_len, 1024]
+            x = self.nar_text_position(x)  # [B, max_text_token_len, 1024]
 
             y_emb, prefix_len = self._prepare_prompts(
-                y, y_lens, codes, nar_stage, y_prompts_codes)
+                y, y_lens, codes, nar_stage, y_prompts_codes)  # [B, max_text_token_len, 1024], int value
 
             y_len = y_lens.max()
-            targets = codes[..., nar_stage] + NUM_AUDIO_TOKENS * y_mask_int
-            # if self.prefix_mode in [2, 4]:
-            #     y_mask = F.pad(y_mask, (y_emb.shape[1] - y_len, 0), value=False)
-            # elif self.prefix_mode == 1:
-            #     targets = targets[:, prefix_len:]
-            # else:
-            #     assert prefix_len == 0 different from VallF
+            targets = codes[..., nar_stage] + NUM_AUDIO_TOKENS * \
+                y_mask_int  # [B, max_audio_token_len]
+
             if self.prefix_mode in [2, 4]:
                 xy_padding_mask = torch.concat(
                     [x_mask, F.pad(y_mask, (y_emb.shape[1] - y_len, 0), value=False)], dim=1)
             elif self.prefix_mode == 1:
+                # [B, max_audio_token_len-prefix_len]
                 targets = targets[:, prefix_len:]
 
+            # [B, max_audio_token_len, 1024]
             y_pos = self.nar_audio_prenet(y_emb)
             y_pos = self.nar_audio_position(y_pos)
+            # [B, max_text_token_len+max_audio_token_len, 1024]
             xy_pos = torch.concat([x, y_pos], dim=1)
             xy_dec, _ = self.nar_decoder((xy_pos, self.nar_stage_embeddings[nar_stage - 1].weight),
                                          src_key_padding_mask=xy_padding_mask)
+            # predicted audio tokens
+            # [B, x_lens.max() + prefix_len:,1024]
             xy_dec = xy_dec[:, x_lens.max() + prefix_len:]
             if self.prefix_mode == 4:
                 prefix_len = 0  # reset for Top10Accuracy metric
             logits = self.nar_predict_layers[nar_stage -
-                                             1](xy_dec).permute(0, 2, 1)
-
-            # y_dec, _ = self.nar_decoder(
-            #     (y_pos, self.nar_stage_embeddings[nar_stage - 1].weight),
-            #     x,
-            #     tgt_mask=None,
-            #     tgt_key_padding_mask=y_mask,
-            #     memory_mask=None,
-            #     memory_key_padding_mask=x_mask,
-            # )
-            # if self.prefix_mode != 0:
-            #     y_dec = y_dec[:, prefix_len:]
-            #     if self.prefix_mode == 4:
-            #         prefix_len = 0  # reset for Top10Accuracy metric
-
-            # logits = self.nar_predict_layers[nar_stage -
-            #                                  1](y_dec).permute(0, 2, 1) different from VallF
+                                             1](xy_dec).permute(0, 2, 1)  # [B, 1024, x_lens.max() + prefix_len:]
 
             # loss
             total_length = (y_lens).sum().type(torch.float32)

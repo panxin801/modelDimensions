@@ -363,9 +363,9 @@ def load_checkpoint_if_available(
       Return a dict containing previously saved training info.
     """
     if params.start_batch > 0:
-        filename = params.exp_dir / f"checkpoint-{params.start_batch}.pt"
+        filename = Path(params.exp_dir) / f"checkpoint-{params.start_batch}.pt"
     elif params.start_epoch > 1:
-        filename = params.exp_dir / f"epoch-{params.start_epoch-1}.pt"
+        filename = Path(params.exp_dir) / f"epoch-{params.start_epoch-1}.pt"
     else:
         return None
 
@@ -401,18 +401,20 @@ def load_checkpoint_if_available(
                 if key in saved_params:
                     saved_params.pop(key)
 
-        best_train_filename = params.exp_dir / "best-train-loss.pt"
+        best_train_filename = Path(params.exp_dir) / "best-train-loss.pt"
         if best_train_filename.is_file():
             copyfile(
                 src=best_train_filename,
-                dst=params.exp_dir / f"best-train-loss-stage{saved_stage}.pt",
+                dst=Path(params.exp_dir) /
+                f"best-train-loss-stage{saved_stage}.pt",
             )
 
-        best_valid_filename = params.exp_dir / "best-valid-loss.pt"
+        best_valid_filename = Path(params.exp_dir) / "best-valid-loss.pt"
         if best_valid_filename.is_file():
             copyfile(
                 src=best_valid_filename,
-                dst=params.exp_dir / f"best-valid-loss-stage{saved_stage}.pt",
+                dst=Path(params.exp_dir) /
+                f"best-valid-loss-stage{saved_stage}.pt",
             )
     else:
         keys = [
@@ -460,7 +462,7 @@ def save_checkpoint(
     """
     if rank != 0:
         return
-    filename = params.exp_dir / f"epoch-{params.cur_epoch}.pt"
+    filename = Path(params.exp_dir) / f"epoch-{params.cur_epoch}.pt"
     save_checkpoint_impl(
         filename=filename,
         model=model,
@@ -474,11 +476,11 @@ def save_checkpoint(
     )
 
     if params.best_train_epoch == params.cur_epoch:
-        best_train_filename = params.exp_dir / "best-train-loss.pt"
+        best_train_filename = Path(params.exp_dir) / "best-train-loss.pt"
         copyfile(src=filename, dst=best_train_filename)
 
     if params.best_valid_epoch == params.cur_epoch:
-        best_valid_filename = params.exp_dir / "best-valid-loss.pt"
+        best_valid_filename = Path(params.exp_dir) / "best-valid-loss.pt"
         copyfile(src=filename, dst=best_valid_filename)
 
 
