@@ -85,7 +85,7 @@ class VALLF(nn.Module):
         self.nar_text_embedding = TokenEmbedding(
             nar_d_model, NUM_TEXT_TOKENS)  # 1024,512
 
-        # ID NUM_AUDIO_TOKENS=1024
+        # NUM_AUDIO_TOKENS=1024
         # ID NUM_AUDIO_TOKENS     -> PAD
         # ID NUM_AUDIO_TOKENS + 1 -> BOS
 
