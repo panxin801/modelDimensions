@@ -879,12 +879,16 @@ class VALLE(VALLF):
         """
         Args:
           x:
-            A 2-D tensor of shape (1, S).
+            A 2-D tensor of shape (1, S).S=text_prompt_token_len+target_text_token_lens
+            this is {text_prompt_token target_text_token} formation
           x_lens:
             A 1-D tensor of shape (1,). It contains the number of tokens in `x`
             before padding.
           y:
-            A 3-D tensor of shape (1, T, 8).
+            A 3-D tensor of shape (1, T, 8). audio_prompt_token from EnCodec 8 quantizers
+          enroll_x_lens:
+            A 1-D tensor of shape (1,)=text_prompt_token_len. 
+            It contains the number of prompt_text_token
           top_k: (`optional`) int
             The number of highest probability tokens to keep for top-k-filtering. Default to -100.
           temperature: (`optional`) float
@@ -892,50 +896,56 @@ class VALLE(VALLF):
         Returns:
           Return the predicted audio code matrix.
         """
-        assert x.ndim == 2, x.shape
+        assert x.ndim == 2, x.shape  # text_prompt + target_text_token
         assert x_lens.ndim == 1, x_lens.shape
-        assert y.ndim == 3, y.shape
+        assert y.ndim == 3, y.shape  # audio prompt
         assert y.shape[0] == 1, y.shape
 
         assert torch.all(x_lens > 0)
 
         # NOTE: x has been padded in TextTokenCollater
-        text = x
-        x = self.ar_text_embedding(text)
+        text = x  # [B, text_token_len]
+        x = self.ar_text_embedding(text)  # [B, text_token_len, 1024]
         x = self.ar_text_prenet(x)
-        x = self.ar_text_position(x)
+        x = self.ar_text_position(x)  # [B, text_token_len, 1024]
 
         text_len = x_lens.max()
-        prompts = y
+        prompts = y  # [B, frames, 8]
         prefix_len = y.shape[1]
 
         # AR Decoder
         # TODO: Managing decoder steps avoid repetitive computation
-        y = prompts[..., 0]
+        y = prompts[..., 0]  # [B, frames], y from quantizer 0
         if self.ar_audio_prepend_bos:
             y = F.pad(y, (1, 0), value=NUM_AUDIO_TOKENS + 1)
 
         x_len = x_lens.max()
+        # all false, [x_len, x_len]
         x_attn_mask = torch.zeros((x_len, x_len), dtype=torch.bool)
 
         while True:
+            # [B, frames, 1024], input from EnCodec quantizer 0
             y_emb = self.ar_audio_embedding(y)
             y_emb = self.ar_audio_prenet(y_emb)
             y_pos = self.ar_audio_position(y_emb)
+            # [B, text_token_len+frames, 1024]
             xy_pos = torch.concat([x, y_pos], dim=1)
 
             y_len = y.shape[1]
+            # [x_len, x_len+y_len]
             x_attn_mask_pad = F.pad(x_attn_mask, (0, y_len), value=True)
             y_attn_mask = F.pad(torch.triu(torch.ones(y_len, y_len, dtype=torch.bool), diagonal=1),
                                 (x_len, 0),
-                                value=False)
+                                value=False)  # [y_len, x_len+y_len]
             xy_attn_mask = torch.concat(
-                [x_attn_mask_pad, y_attn_mask], dim=0).to(y.device)
+                [x_attn_mask_pad, y_attn_mask], dim=0).to(y.device)  # [x_len+y_len,x_len+y_len]
 
+            # [B, text_token_len+frames, 1024]
             xy_dec, _ = self.ar_decoder((xy_pos, None), mask=xy_attn_mask,)
+            # xy_dec[:, -1]=[B, 1024], logits=[1, 1024+1]
             logits = self.ar_predict_layer(xy_dec[:, -1])
             samples = topk_sampling(logits, top_k=top_k,
-                                    top_p=1.0, temperature=temperature)
+                                    top_p=1.0, temperature=temperature)  # [B,1]
 
             if (torch.argmax(logits, dim=-1)[0] == NUM_AUDIO_TOKENS or
                 samples[0, 0] == NUM_AUDIO_TOKENS or
@@ -947,15 +957,16 @@ class VALLE(VALLF):
                 print(f"VALL-E EOS [{prompts.shape[1]} -> {y.shape[1]}]")
                 break
 
-            y = torch.concat([y, samples], dim=1)
+            y = torch.concat([y, samples], dim=1)  # [y, one_new_sample]
 
+        # new generated audio tokens from AR Decoder
         codes = [y[:, prefix_len + int(self.ar_audio_prepend_bos):]]
         if self.num_quantizers == 1:
             return torch.stack(codes, dim=-1)
 
         # Non-AR Decoders
         y_emb = self.nar_audio_embeddings[0](
-            y[:, int(self.ar_audio_prepend_bos):])
+            y[:, int(self.ar_audio_prepend_bos):])  # These y generated from AR Decoder, include audio_prompt and new_generated_audio_tokens
 
         if self.prefix_mode in [2, 4]:  # Exclude enrolled_phonemes
             enrolled_len = enroll_x_lens.max().item()
@@ -964,9 +975,9 @@ class VALLE(VALLF):
             text_len = text_len - (enrolled_len - 2)
             assert text.shape[0] == 1
 
-        x = self.nar_text_embedding(text)
-        x = self.nar_text_prenet(x)
-        x = self.nar_text_position(x)
+        x = self.nar_text_embedding(text)  # [B, x_len, 1024]
+        x = self.nar_text_prenet(x)  # [B, x_len, 1024]
+        x = self.nar_text_position(x)  # [B, x_len, 1024]
 
         if self.prefix_mode == 0:
             for i, (predict_layer, embedding_layer) in enumerate(
@@ -991,17 +1002,20 @@ class VALLE(VALLF):
             for j in range(1, self.num_quantizers):
                 y_emb[:,
                       :prefix_len] += self.nar_audio_embeddings[j](prompts[..., j])
+                # nar_audio_embeddings input is audio prompt from EnCodec i-th quantizer
             for i, (predict_layer, embedding_layer) in enumerate(
                     zip(self.nar_predict_layers, self.nar_audio_embeddings[1:])):
                 y_pos = self.nar_audio_prenet(y_emb)
                 y_pos = self.nar_audio_position(y_pos)
+                # [B, x_len+y_len, 1024]
                 xy_pos = torch.concat([x, y_pos], dim=1)
 
                 xy_dec, _ = self.nar_decoder(
-                    (xy_pos, self.nar_stage_embeddings[i].weight)
-                )
+                    (xy_pos, self.nar_stage_embeddings[i].weight))  # [B, x_len+y_len, 1024]
+                # [B, new_generated_audio_token_len, 1024]
                 logits = predict_layer(xy_dec[:, text_len + prefix_len:])
 
+                # [B, new_generated_audio_token_len]
                 samples = torch.argmax(logits, dim=-1)
                 codes.append(samples)
 
@@ -1009,7 +1023,7 @@ class VALLE(VALLF):
                     y_emb[:, prefix_len:] += embedding_layer(samples)
 
         assert len(codes) == self.num_quantizers
-        return torch.stack(codes, dim=-1)
+        return torch.stack(codes, dim=-1)  # elements of codes are same size
 
     def continual(
         self,
@@ -1169,9 +1183,10 @@ def topk_sampling(logits, top_k=10, top_p=1.0, temperature=1.0):
     # Temperature (higher temperature => more likely to sample low probability tokens)
 
     if temperature != 1.0:
-        logits = logits / temperature
+        logits = logits / temperature  # [B, audio_token_len]
     # Top-p/top-k filtering
-    logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
+    logits = top_k_top_p_filtering(
+        logits, top_k=top_k, top_p=top_p)  # [B, audio_token_len]
     # Sample
-    token = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
+    token = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)  # [B,1]
     return token

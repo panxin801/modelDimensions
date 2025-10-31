@@ -280,3 +280,14 @@ Train NAR model
                 "--keep-last-k", "4",
                 ],
 ```
+Inference
+```json
+            "args": [
+                "--output-dir", "infer/demos",
+                "--checkpoint","exp/bak/best-valid-loss-stage2.pt",
+                "--text-prompts", "卡尔普陪外孙玩滑梯。",
+                "--audio-prompts", "./egs/bznsyp/000001.wav",
+                "--text", "这是一个合成测试。",
+                "--text-extractor","pypinyin_initials_finals",
+                ],
+```
