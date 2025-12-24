@@ -207,7 +207,7 @@ class AudioTokenizer:
                  device: Any = None) -> None:
         # Instantiate a pretrained EnCodec model
         model = EncodecModel.encodec_model_24khz()
-        model.set_target_bandwidth(6.0)
+        model.set_target_bandwidth(6.0)  # 设定Encodec的目标带宽为6.0
         remove_encodec_weight_norm(model)
 
         if not device:
@@ -368,7 +368,7 @@ class AudioTokenExtractor(FeatureExtractor):
 
 if __name__ == "__main__":
     model = EncodecModel.encodec_model_24khz()
-    model.set_target_bandwidth(6.0)
+    model.set_target_bandwidth(6.0)  # 设定Encodec的目标带宽为6.0
 
     samples = torch.from_numpy(np.random.random(
         [4, 1, 1600])).type(torch.float32)  # [B,1,samples]=[4,1,1600]
