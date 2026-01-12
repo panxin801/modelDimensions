@@ -13,6 +13,8 @@ NT_GPT_TTS： Neural transducer two stage TTS model. Working like GPT_sovits.
 
 VallE: First language model like TTS model, using neural codec extract discrete codes as intermediate and put into neural decoder synthesize wavs.
 
+Cosyvoice: TTS 2023 new pipeline, similar with GPT-Sovits both using LLM but details are different.
+
 
 
 
@@ -47,4 +49,6 @@ VallE: First language model like TTS model, using neural codec extract discrete 
     Using wav2vec2 and K-Means extract discrete token as stage1,  put into vits architecture acoustic as stage2, pipeline similar to GPT_VITS
     
 - VallE(unoffical implementation): https://github.com/lifeiteng/vall-e
+
+- Cosyvoice: https://github.com/FunAudioLLM/CosyVoice/tree/main
 
