@@ -41,7 +41,7 @@ class CosyVoice:
         if not os.path.exists(hyper_yaml_path):
             raise ValueError(f"{hyper_yaml_path} not found!")
         with open(hyper_yaml_path, "rt", encoding="utf8") as fr:
-            configs = load_hyperpyyaml(fr)
+            configs = load_hyperpyyaml(fr)  # 这里可以根据yaml文件里的class type直接实例化
         assert get_model_type(
             configs) == CosyVoice, f"do not use {model_dir} for CosyVoice initialization!"
 
