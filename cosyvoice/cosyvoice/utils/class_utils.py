@@ -34,6 +34,12 @@ from cosyvoice.transformer.embedding import (PositionalEncoding,
                                              EspnetRelPositionalEncoding)
 from cosyvoice.transformer.attention import (MultiHeadedAttention,
                                              RelPositionMultiHeadedAttention)
+from cosyvoice.llm.llm import (TransformerLM, )  # Qwen2LM, CosyVoice3LM
+from cosyvoice.flow.flow import (
+    MaskedDiffWithXvec, )  # CausalMaskedDiffWithXvec, CausalMaskedDiffWithDiT
+from cosyvoice.hifigan.generator import (HiFTGenerator, CausalHiFTGenerator)
+from cosyvoice.cli.model import (
+    CosyVoiceModel, )  # CosyVoice2Model, CosyVoice3Model
 
 COSYVOICE_ACTIVATION_CLASSES = {
     "hardtanh": nn.Hardtanh,
@@ -72,4 +78,17 @@ COSYVOICE_ATTENTION_CLASSES = {
 
 
 def get_model_type(configs):
-    ...
+    # NOTE CosyVoice2Model inherits CosyVoiceModel
+    if isinstance(configs["llm"], TransformerLM) \
+        and isinstance(configs["flow"], MaskedDiffWithXvec)\
+            and isinstance(configs["hift"], HiFTGenerator):
+        return CosyVoiceModel
+    # if isinstance(configs["llm"], Qwen2LM) \
+    #     and isinstance(configs["flow"], CausalMaskedDiffWithXvec)\
+    #         and isinstance(configs["hift"], HiFTGenerator):
+    #     return CosyVoice2Model
+    # if isinstance(configs["llm"], CosyVoice3LM) \
+    #     and isinstance(configs["flow"], CausalMaskedDiffWithDiT)\
+    #         and isinstance(configs["hift"], CausalHiFTGenerator):
+    #     return CosyVoice3Model
+    raise TypeError("No valid model type found!")

@@ -43,7 +43,7 @@ class CosyVoice:
         with open(hyper_yaml_path, "rt", encoding="utf8") as fr:
             configs = load_hyperpyyaml(fr)  # 这里可以根据yaml文件里的class type直接实例化
         assert get_model_type(
-            configs) == CosyVoice, f"do not use {model_dir} for CosyVoice initialization!"
+            configs) == CosyVoiceModel, f"do not use {model_dir} for CosyVoice initialization!"
 
         # Frontend and sr
         self.frontend = CosyVoiceFrontEnd(configs["get_tokenizer"],
@@ -64,12 +64,12 @@ class CosyVoice:
         # TTS model
         self.model = CosyVoiceModel(configs["llm"],
                                     configs["flow"],
-                                    configs["hifi"],
+                                    configs["hift"],
                                     fp16)
         # load ckpt
         self.model.load(f"{model_dir}/llm.pt",
                         f"{model_dir}/flow.pt",
-                        f"{model_dir}/hifi.pt")
+                        f"{model_dir}/hift.pt")
 
         # load jit
         if load_jit:
