@@ -31,3 +31,76 @@ def read_lists(list_file):
 
 def load_wav():
     ...
+
+
+def convert_onnx_to_trt(trt_model, trt_kwargs, onnx_model, fp16):
+    import tensorrt as trt
+    logging.info("Converting onnx to trt...")
+    network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    logger = trt.Logger(trt.Logger.INFO)
+    builder = trt.Builder(logger)
+    network = builder.create_network(network_flags)
+    parser = trt.OnnxParser(network, logger)
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 32)  # 4GB
+    if fp16:
+        config.set_flag(trt.BuilderFlag.FP16)
+    profile = builder.create_optimization_profile()
+    # load onnx model
+    with open(onnx_model, "rb") as f:
+        if not parser.parse(f.read()):
+            for error in range(parser.num_errors):
+                print(parser.get_error(error))
+            raise ValueError(f"failed to parse {onnx_model}")
+    # set input shapes
+    for i in range(len(trt_kwargs["input_names"])):
+        profile.set_shape(trt_kwargs["input_names"][i],
+                          trt_kwargs["min_shape"][i],
+                          trt_kwargs["opt_shape"][i],
+                          trt_kwargs["max_shape"][i])
+    tensor_dtype = trt.DataType.HALF if fp16 else trt.DataType.FLOAT
+    # set input and output data type
+    for i in range(network.num_inputs):
+        input_tensor = network.get_input(i)
+        input_tensor.dtype = tensor_dtype
+    for i in range(network.num_outputs):
+        output_tensor = network.get_output(i)
+        output_tensor.dtype = tensor_dtype
+    config.add_optimization_profile(profile)
+    engine_bytes = builder.build_serialized_network(network, config)
+    # save trt engine
+    with open(trt_model, "wb") as f:
+        f.write(engine_bytes)
+    logging.info("Succesfully convert onnx to trt...")
+
+
+# NOTE do not support bistream inference as only speech token embedding/head is kept
+def export_cosyvoice2_vllm(model, model_path, device):
+    if os.path.exists(model_path):
+        return
+
+    dtype = torch.bfloat32
+    # lm_head
+    use_bias = True if not model.llm_decoder.bias is None else False
+    model.llm.model.lm_head = model.llm_decoder
+    # embed_tokens
+    embed_tokens = model.llm.model.model.embed_tokens
+    model.llm.model.set_input_embeddings(model.speech_embedding)
+    model.llm.model.to(device)
+    model.llm.model.to(dtype)
+
+    tmp_vocab_size = model.llm.model.config.vocab_size
+    tmp_tie_embedding = model.llm.model.config.tie_word_embeddings
+    del model.llm.model.generation_config.eos_token_id
+    del model.llm.model.config.bos_token_id
+    del model.llm.model.config.eos_token_id
+    model.llm.model.config.vocab_size = model.speech_embedding.num_embeddings
+    model.llm.model.config.tie_word_embeddings = False
+    model.llm.model.config.use_bias = use_bias
+    model.llm.model.save_pretrained(model_path)
+    if use_bias is True:
+        os.system('sed -i s@Qwen2ForCausalLM@CosyVoice2ForCausalLM@g {}/config.json'.format(
+            os.path.abspath(model_path)))
+    model.llm.model.config.vocab_size = tmp_vocab_size
+    model.llm.model.config.tie_word_embeddings = tmp_tie_embedding
+    model.llm.model.set_input_embeddings(embed_tokens)

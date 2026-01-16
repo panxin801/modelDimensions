@@ -132,9 +132,9 @@ class ConditionalDecoder(nn.Module):
         self.mid_blocks = nn.ModuleList([])
         self.up_blocks = nn.ModuleList([])
 
-        out_channel = in_channels
+        output_channel = in_channels
         for i in range(len(channels)):  # pylint: disable=consider-using-enumerate
-            input_channel = out_channel
+            input_channel = output_channel
             output_channel = channels[i]
             is_last = i == len(channels) - 1
             resnet = ResnetBlock1D(dim=input_channel,
@@ -207,7 +207,7 @@ class ConditionalDecoder(nn.Module):
             self.up_blocks.append(nn.ModuleList(
                 [resnet, transformer_blocks, upsample]))
         self.final_block = Block1D(channels[-1], channels[-1])
-        self.final_proj = nn.Conv1d(channels[-1], out_channels, 1)
+        self.final_proj = nn.Conv1d(channels[-1], self.out_channels, 1)
         self.initialize_weights()
 
     def initialize_weights(self):

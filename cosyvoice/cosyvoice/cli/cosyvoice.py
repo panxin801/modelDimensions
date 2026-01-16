@@ -51,7 +51,7 @@ class CosyVoice:
                                           f"{model_dir}/campplus.onnx",
                                           f"{model_dir}/speech_tokenizer_v1.onnx",
                                           f"{model_dir}/spk2info.pt",
-                                          configs["allowed_special"])
+                                          configs["allowed_special"])  # in this func download some wetext model and fst stuff.
         self.sample_rate = configs["sample_rate"]
 
         # Set flag
