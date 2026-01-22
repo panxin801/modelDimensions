@@ -65,7 +65,8 @@ class ConditionalCFM(BASECFM):
             sample: generated mel-spectrogram
                 shape: (batch_size, n_feats, mel_timesteps)
         """
-        z = torch.rand_like(mu).to(mu.device).to(mu.dtype) * temperature
+        # torch.randn_like 和torch.rand_like 结果差别大了
+        z = torch.randn_like(mu).to(mu.device).to(mu.dtype) * temperature
         cache_size = cache.size(2)
         # fix prompt and overlap part mu and z
         if cache_size != 0:

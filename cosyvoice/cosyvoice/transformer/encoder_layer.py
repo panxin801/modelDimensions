@@ -61,7 +61,7 @@ class TransformerEncoderLayer(nn.Module):
                 pos_emb: torch.Tensor,
                 mask_pad: torch.Tensor = torch.ones(
                     (0, 0, 0), dtype=torch.bool),
-                attn_cache: torch.Tensor = torch.zeros((0, 0, 0, 0)),
+                att_cache: torch.Tensor = torch.zeros((0, 0, 0, 0)),
                 cnn_cache: torch.Tensor = torch.zeros((0, 0, 0, 0)),
                 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute encoded features.
@@ -89,8 +89,8 @@ class TransformerEncoderLayer(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.norm1(x)
-        x_attn, new_attn_cache = self.self_attn(
-            x, x, x, mask, pos_emb=pos_emb, cache=attn_cache)
+        x_attn, new_att_cache = self.self_attn(
+            x, x, x, mask, pos_emb=pos_emb, cache=att_cache)
         x = residual + self.dropout(x_attn)
         if not self.normalize_before:
             x = self.norm1(x)
@@ -103,7 +103,7 @@ class TransformerEncoderLayer(nn.Module):
             x = self.norm2(x)
 
         fake_cnn_cache = torch.zeros((0, 0, 0), dtype=x.dtype, device=x.device)
-        return x, mask, new_attn_cache, fake_cnn_cache
+        return x, mask, new_att_cache, fake_cnn_cache
 
 
 class ConformerEncoderLayer(nn.Module):
