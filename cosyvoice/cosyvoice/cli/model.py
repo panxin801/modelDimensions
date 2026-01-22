@@ -214,7 +214,7 @@ class CosyVoiceModel:
         if not self.hift_cache_dict[uuid] is None:
             hift_cache_mel, hift_cache_source = self.hift_cache_dict[
                 uuid]["mel"], self.hift_cache_dict[uuid]["source"]
-            tt_mel = torch.concat([hift_cache_mel, tts_mel], dim=2)
+            tts_mel = torch.concat([hift_cache_mel, tts_mel], dim=2)  # !!!!!!
         else:
             hift_cache_source = torch.zeros(1, 1, 0)
         # keep overlap mel and hift cache
@@ -230,7 +230,7 @@ class CosyVoiceModel:
                                          self.speech_window)
             self.hift_cache_dict[uuid] = {"mel": tts_mel[:, :, -self.mel_cache_len:],
                                           "source": tts_source[:, :, -self.source_cache_len:],
-                                          "speech": tts_speech[:, :, -self.source_cache_len:]}
+                                          "speech": tts_speech[:, -self.source_cache_len:]}
             tts_speech = tts_speech[:, :-self.source_cache_len]
         else:
             if speed != 1.0:
@@ -278,7 +278,7 @@ class CosyVoiceModel:
             while True:
                 time.sleep(1e-1)
                 if len(self.tts_speech_token_dict[this_uuid]) >= token_hop_len + self.token_overlap_len:
-                    this_tts_speech_token = self.tensor(
+                    this_tts_speech_token = torch.tensor(
                         self.tts_speech_token_dict[this_uuid][:token_hop_len + self.token_overlap_len]).unsqueeze(0)
                     this_tts_speech = self.token2wav(token=this_tts_speech_token,
                                                      prompt_token=flow_prompt_speech_token,
@@ -287,7 +287,7 @@ class CosyVoiceModel:
                                                      uuid=this_uuid,
                                                      finalize=False)
                     yield {"tts_speech": this_tts_speech.cpu()}
-                    with self.lock():
+                    with self.lock:
                         self.tts_speech_token_dict[this_uuid] = self.tts_speech_token_dict[this_uuid][token_hop_len:]
                     # increase token_hop_len for better speech quality
                     token_hop_len = min(self.token_max_hop_len, int(
