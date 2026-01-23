@@ -26,11 +26,30 @@ logging.basicConfig(level=logging.INFO,
 
 
 def read_lists(list_file):
-    ...
+    lists = []
+    with open(list_file, "r", encoding="utf8") as fin:
+        for line in fin:
+            lists.append(line.strip())
+    return lists
 
 
-def load_wav():
-    ...
+def read_json_lists(list_file):
+    lists = read_lists(list_file)
+    results = {}
+    for fn in lists:
+        with open(fn, "r", encoding="utf8") as fin:
+            results.update(json.load(fin))
+    return results
+
+
+def load_wav(wav, target_sr, min_sr=16000):
+    speech, sample_rate = torchaudio.load(wav, backend="soundfile")
+    speech = speech.mean(dim=0, keepdim=True)
+    if sample_rate != target_sr:
+        assert sample_rate >= min_sr, f"wav sample rate {sample_rate} must be greater than {target_sr}"
+        speech = torchaudio.transforms.Resample(
+            orig_freq=sample_rate, new_freq=target_sr)(speech)
+    return speech
 
 
 def convert_onnx_to_trt(trt_model, trt_kwargs, onnx_model, fp16):

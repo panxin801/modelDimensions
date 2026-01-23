@@ -135,6 +135,42 @@ class CosyVoiceFrontEnd:
             for i in range(text_token.size(1)):
                 yield text_token[:, i:i + 1]
 
+    def _extract_speech_feat(self, prompt_wav):
+        speech = load_wav(prompt_wav, 24000)
+        speech_feat = self.feat_extractor(speech).squeeze(
+            0).transpose(0, 1).to(self.device)
+        speech_feat = speech_feat.unsqueeze(0)
+        speech_feat_len = torch.tensor(
+            [speech_feat.size(1)], dtype=torch.int, device=self.device)
+        return speech_feat, speech_feat_len
+
+    def _extract_speech_token(self, prompt_wav):
+        speech = load_wav(prompt_wav, 16000)
+        assert speech.size(
+            1) / 16000 <= 30, "Do not support extract speech token for audio longer than 30s"
+        feat = whisper.log_mel_spectrogram(speech, n_mels=128)
+        speech_token = self.speech_tokenizer_session.run(None,
+                                                         {self.speech_tokenizer_session.get_inputs()[0].name: feat.detach().cpu().numpy(),
+                                                          self.speech_tokenizer_session.get_inputs()[1].name: np.array([feat.size(2)], dtype=np.int32)}
+                                                         )[0].flatten().tolist()
+        speech_token = torch.tensor(
+            [speech_token], dtype=torch.int32, device=self.device)
+        speech_token_len = torch.tensor(
+            [speech_token.size(1)], dtype=torch.int, device=self.device)
+        return speech_token, speech_token_len
+
+    def _extrac_spk_embedding(self, prompt_wav):
+        speech = load_wav(prompt_wav, 16000)
+        feat = kaldi.fbank(speech,
+                           num_mel_bins=80,
+                           dither=0,
+                           sample_frequency=16000)
+        feat = feat - feat.mean(0, keepdim=True)
+        embedding = self.campplus_session.run(None,
+                                              {self.campplus_session.get_inputs()[0].name: feat.unsqueeze(0).cpu().numpy()})[0].flatten().tolist()
+        embedding = torch.tensor([embedding], device=self.device)
+        return embedding
+
     def frontend_sft(self, tts_text, spk_id):
         tts_text_token, tts_text_token_len = self._extract_text_token(tts_text)
         embedding = self.spk2info[spk_id]["embedding"]
@@ -143,4 +179,44 @@ class CosyVoiceFrontEnd:
                        "llm_embedding": embedding,
                        "flow_embedding": embedding}
         # llm embedding and flow embedding are the same
+        return model_input
+
+    def frontend_zero_shot(self,
+                           tts_text,
+                           prompt_text,
+                           prompt_wav,
+                           resample_rate,
+                           zero_shot_spk_id,
+                           ):
+        tts_text_token, tts_text_token_len = self._extract_text_token(tts_text)
+        if zero_shot_spk_id == "":
+            prompt_text_token, prompt_text_token_len = self._extract_text_token(
+                prompt_text)
+            speech_feat, speech_feat_len = self._extract_speech_feat(
+                prompt_wav)
+            speech_token, speech_token_len = self._extract_speech_token(
+                prompt_wav)
+            if resample_rate == 24000:
+                # cosyvoice2, force speech_feat % speech_token = 2
+                token_len = min(int(speech_feat.size(1) / 2),
+                                speech_token.size(1))
+                speech_feat, speech_feat_len[:] = speech_feat[:,
+                                                              :2 * token_len], 2 * token_len
+                speech_token, speech_token_len[:] = speech_token[:,
+                                                                 :token_len], token_len
+            embedding = self._extrac_spk_embedding(prompt_wav)
+            model_input = {"prompt_text": prompt_text_token,
+                           "prompt_text_len": prompt_text_token_len,
+                           "llm_prompt_speech_token": speech_token,
+                           "llm_prompt_speech_token_len": speech_token_len,
+                           "flow_prompt_speech_token": speech_token,
+                           "flow_prompt_speech_token_len": speech_token_len,
+                           "prompt_speech_feat": speech_feat,
+                           "prompt_speech_feat_len": speech_feat_len,
+                           "llm_embedding": embedding,
+                           "flow_embedding": embedding}
+        else:
+            model_input = {**self.spk2info[zero_shot_spk_id]}
+        model_input["text"] = tts_text_token
+        model_input["text_len"] = tts_text_token_len
         return model_input
