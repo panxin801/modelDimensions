@@ -159,7 +159,7 @@ class CosyVoiceFrontEnd:
             [speech_token.size(1)], dtype=torch.int, device=self.device)
         return speech_token, speech_token_len
 
-    def _extrac_spk_embedding(self, prompt_wav):
+    def _extract_spk_embedding(self, prompt_wav):
         speech = load_wav(prompt_wav, 16000)
         feat = kaldi.fbank(speech,
                            num_mel_bins=80,
@@ -204,7 +204,7 @@ class CosyVoiceFrontEnd:
                                                               :2 * token_len], 2 * token_len
                 speech_token, speech_token_len[:] = speech_token[:,
                                                                  :token_len], token_len
-            embedding = self._extrac_spk_embedding(prompt_wav)
+            embedding = self._extract_spk_embedding(prompt_wav)
             model_input = {"prompt_text": prompt_text_token,
                            "prompt_text_len": prompt_text_token_len,
                            "llm_prompt_speech_token": speech_token,
@@ -219,4 +219,48 @@ class CosyVoiceFrontEnd:
             model_input = {**self.spk2info[zero_shot_spk_id]}
         model_input["text"] = tts_text_token
         model_input["text_len"] = tts_text_token_len
+        return model_input
+
+    def frontend_cross_lingual(self,
+                               tts_text,
+                               prompt_wav,
+                               resample_rate,
+                               zero_shot_spk_id):
+        model_input = self.frontend_zero_shot(
+            tts_text, "", prompt_wav, resample_rate, zero_shot_spk_id)
+        # in cross lingual mode, we remove prompt in llm
+        del model_input["prompt_text"]
+        del model_input["prompt_text_len"]
+        del model_input["llm_prompt_speech_token"]
+        del model_input["llm_prompt_speech_token_len"]
+        return model_input
+
+    def frontend_vc(self,
+                    source_speech_16k,
+                    prompt_wav,
+                    resample_rate):
+        prompt_speech_token, prompt_speech_token_len = self._extract_speech_token(
+            prompt_wav)
+        prompt_speech_feat, prompt_speech_feat_len = self._extract_speech_feat(
+            prompt_wav)
+        embedding = self._extract_spk_embedding(prompt_wav)
+        source_speech_token, source_speech_token_len = self._extract_speech_token(
+            source_speech_16k)
+        model_input = {"source_speech_token": source_speech_token,
+                       "source_speech_token_len": source_speech_token_len,
+                       "flow_prompt_speech_token": prompt_speech_token,
+                       "flow_prompt_speech_token_len": prompt_speech_token_len,
+                       "prompt_speech_feat": prompt_speech_feat,
+                       "prompt_speech_feat_len": prompt_speech_feat_len,
+                       "flow_embedding": embedding}
+        return model_input
+
+    def frontend_instruct(self, tts_text, spk_id, instruct_text):
+        model_input = self.frontend_sft(tts_text, spk_id)
+        # in instruct mode, we remove spk_embedding in llm due to information leakage
+        del model_input["llm_embedding"]
+        instruct_text_token, instruct_text_token_len = self._extract_text_token(
+            instruct_text)
+        model_input["prompt_text"] = instruct_text_token
+        model_input["prompt_text_len"] = instruct_text_token_len
         return model_input

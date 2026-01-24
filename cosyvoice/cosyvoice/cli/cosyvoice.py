@@ -90,6 +90,21 @@ class CosyVoice:
         spks = list(self.frontend.spk2info.keys())
         return spks
 
+    def add_zero_shot_spk(self,
+                          prompt_text,
+                          prompt_wav,
+                          zero_shot_spk_id):
+        assert zero_shot_spk_id != "", "do not use empty zero_shot_spk_id"
+        model_input = self.frontend.frontend_zero_shot("",
+                                                       prompt_text,
+                                                       prompt_wav,
+                                                       self.sample_rate,
+                                                       "")
+        del model_input["text"]
+        del model_input["text_len"]
+        self.frontend.spk2info[zero_shot_spk_id] = model_input
+        return True
+
     def save_spkinfo(self):
         torch.save(self.frontend.spk2info, f"{self.model_dir}/spk2info.pt")
 
@@ -127,6 +142,67 @@ class CosyVoice:
                                                            prompt_wav,
                                                            self.sample_rate,
                                                            zero_shot_spk_id)
+            start_time = time.time()
+            logging.info(f"synthesis text {i}")
+            for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
+                speech_len = model_output["tts_speech"].size(
+                    1) / self.sample_rate
+                logging.info(
+                    f"yield speech len {speech_len}, rtf {(time.time()-start_time)/speech_len}")
+                yield model_output
+                start_time = time.time()
+
+    def inference_cross_lingual(self,
+                                tts_text,
+                                prompt_wav,
+                                zero_shot_spk_id="",
+                                stream=False,
+                                speed=1.0,
+                                text_frontend=True):
+        for i in tqdm(self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend)):
+            model_input = self.frontend.frontend_cross_lingual(i,
+                                                               prompt_wav,
+                                                               self.sample_rate,
+                                                               zero_shot_spk_id)
+            start_time = time.time()
+            logging.info(f"synthesis text {i}")
+            for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
+                speech_len = model_output["tts_speech"].size(
+                    1) / self.sample_rate
+                logging.info(
+                    f"yield speech len {speech_len}, rtf {(time.time()-start_time)/speech_len}")
+                yield model_output
+                start_time = time.time()
+
+    def inference_vc(self,
+                     source_wav,
+                     prompt_wav,
+                     stream=False,
+                     speed=1.0):
+        model_input = self.frontend.frontend_vc(source_wav,
+                                                prompt_wav,
+                                                self.sample_rate)
+        start_time = time.time()
+        for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
+            speech_len = model_output["tts_speech"].size(1) / self.sample_rate
+            logging.info(
+                f"yield speech len {speech_len}, rtf {(time.time()-start_time)/speech_len}")
+            yield model_output
+            start_time = time.time()
+
+    def inference_instruct(self,
+                           tts_text,
+                           spk_id,
+                           instruct_text,
+                           stream=False,
+                           speed=1.0,
+                           text_frontend=True):
+        assert self.__class__.__name__ == "CosyVoice", "inference_instruct is only implemented for CosyVoice!"
+        instruct_text = self.frontend.text_normalize(
+            instruct_text, split=False, text_frontend=text_frontend)
+        for i in tqdm(self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend)):
+            model_input = self.frontend.frontend_instruct(
+                i, spk_id, instruct_text)
             start_time = time.time()
             logging.info(f"synthesis text {i}")
             for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
