@@ -10,7 +10,7 @@ def cosyvoice_example():
     """
 
     cosyvoice = AutoModel(
-        model_dir="cosyvoicePretrainModels\pretrained_models\CosyVoice-300M-SFT")
+        model_dir="/data/cosyvoicePretrainModels/pretrained_models/CosyVoice-300M-SFT")
     # sft usage
     print(cosyvoice.list_available_spks())
     # change stream=True for chunk stream inference
@@ -18,7 +18,7 @@ def cosyvoice_example():
         torchaudio.save(f"sft_{i}.wav", j["tts_speech"], cosyvoice.sample_rate)
 
     cosyvoice = AutoModel(
-        model_dir="cosyvoicePretrainModels\pretrained_models\CosyVoice-300M")
+        model_dir="/data/cosyvoicePretrainModels/pretrained_models/CosyVoice-300M")
     # zero_shot usage
     for i, j in enumerate(cosyvoice.inference_zero_shot("收到好友从远方寄来的生日礼物，那份意外的惊喜与深深的祝福让我心中充满了甜蜜的快乐，笑容如花儿般绽放。", "希望你以后能够做的比我还好呦。", "asset\zero_shot_prompt.wav")):
         torchaudio.save(f"zero_shot_{i}.wav",
@@ -33,7 +33,7 @@ def cosyvoice_example():
         torchaudio.save(f"vc_{i}.wav", j["tts_speech"], cosyvoice.sample_rate)
 
     cosyvoice = AutoModel(
-        model_dir="cosyvoicePretrainModels\pretrained_models\CosyVoice-300M-Instruct")
+        model_dir="/data/cosyvoicePretrainModels/pretrained_models/CosyVoice-300M-Instruct")
     # instruct usage, support <laughter></laughter><strong></strong>[laughter][breath]
     for i, j in enumerate(cosyvoice.inference_instruct(f"在面对挑战时，他展现了非凡的<strong>勇气</strong>与<strong>智慧</strong>。", "中文男", "'Theo \'Crimson\', is a fiery, passionate rebel leader. Fights with fervor for justice, but struggles with impulsiveness.<|endofprompt|>")):
         torchaudio.save(f"instruct_{i}.wav",
