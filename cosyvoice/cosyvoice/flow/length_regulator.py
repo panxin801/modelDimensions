@@ -21,19 +21,19 @@ from cosyvoice.utils.mask import make_pad_mask
 class InterpolateRegulator(nn.Module):
     def __init__(
             self,
-            channels: int,
-            sampling_ratios: Tuple,
-            out_channels: int = None,
-            groups: int = 1,
+            channels: int,  # 80
+            sampling_ratios: Tuple,  # [1,1,1,1]
+            out_channels: int = None,  # None
+            groups: int = 1,  # 1
     ):
         super().__init__()
-        self.sampling_ratios = sampling_ratios
-        out_channels = out_channels or channels
+        self.sampling_ratios = sampling_ratios  # [1,1,1,1]
+        out_channels = out_channels or channels  # 80
         model = nn.ModuleList([])
         if len(sampling_ratios) > 0:
             for _ in sampling_ratios:
-                module = nn.Conv1d(channels, channels, 3, 1, 1)
-                norm = nn.GroupNorm(groups, channels)
+                module = nn.Conv1d(channels, channels, 3, 1, 1)  # 80,80,3,1,1
+                norm = nn.GroupNorm(groups, channels)  # 1,80
                 act = nn.Mish()
                 model.extend([module, norm, act])
         model.append(

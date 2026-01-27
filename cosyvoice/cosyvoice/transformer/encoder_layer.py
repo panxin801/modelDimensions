@@ -37,19 +37,19 @@ class TransformerEncoderLayer(nn.Module):
     """
 
     def __init__(self,
-                 size: int,
-                 self_attn: nn.Module,
-                 feed_forward: nn.Module,
-                 dropout_rate: float,
-                 normalize_before: bool = True,
+                 size: int,  # 1024
+                 self_attn: nn.Module,  # RelPositionMultiHeadedAttention
+                 feed_forward: nn.Module,  # PositionwiseFeedForward
+                 dropout_rate: float,  # 0.1
+                 normalize_before: bool = True,  # True
                  ):
         """Construct an EncoderLayer object."""
         super().__init__()
 
         self.self_attn = self_attn
         self.feed_forward = feed_forward
-        self.size = size
-        self.normalize_before = normalize_before
+        self.size = size  # 1024
+        self.normalize_before = normalize_before  # True
 
         self.norm1 = nn.LayerNorm(size, eps=1e-12)
         self.norm2 = nn.LayerNorm(size, eps=1e-12)
@@ -127,22 +127,23 @@ class ConformerEncoderLayer(nn.Module):
     """
 
     def __init__(self,
-                 size: int,
-                 self_attn: nn.Module,
+                 size: int,  # 1024
+                 self_attn: nn.Module,  # RelPositionMultiHeadedAttention
+                 # PositionwiseFeedForward
                  feef_forward: Optional[nn.Module] = None,
-                 feed_forward_macaron: Optional[nn.Module] = None,
-                 conv_module: Optional[nn.Module] = None,
-                 dropout_rate: float = 0.1,
-                 normalize_before: bool = True,):
+                 feed_forward_macaron: Optional[nn.Module] = None,  # None
+                 conv_module: Optional[nn.Module] = None,  # None
+                 dropout_rate: float = 0.1,  # 0.1
+                 normalize_before: bool = True,):  # True
         """Construct an EncoderLayer object."""
         super().__init__()
 
         self.self_attn = self_attn
         self.feed_forward = feef_forward
-        self.feed_forward_macaron = feed_forward_macaron
-        self.conv_module = conv_module
-        self.size = size
-        self.normalize_before = normalize_before
+        self.feed_forward_macaron = feed_forward_macaron  # None
+        self.conv_module = conv_module  # None
+        self.size = size  # 1024
+        self.normalize_before = normalize_before  # True
 
         self.norm_ff = nn.LayerNorm(size, eps=1e-12)  # for the FNN module
         self.norm_mha = nn.LayerNorm(size, eps=1e-12)  # for the MHA module
@@ -150,14 +151,14 @@ class ConformerEncoderLayer(nn.Module):
             self.norm_ff_macaron = nn.LayerNorm(size, eps=1e-12)
             self.ff_scale = 0.5
         else:
-            self.ff_scale = 1.0
+            self.ff_scale = 1.0  # 1.0
 
         if not self.conv_module is None:
             self.norm_conv = nn.LayerNorm(
                 size, eps=1e-12)  # for the CNN module
             # for the final output of the block
             self.norm_final = nn.LayerNorm(size, eps=1e-12)
-        self.dropout = nn.Dropout(dropout_rate)
+        self.dropout = nn.Dropout(dropout_rate)  # 0.1
 
     def forward(self,
                 x: torch.Tensor,

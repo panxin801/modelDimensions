@@ -329,25 +329,25 @@ class TransformerEncoder(BaseEncoder):
     """Transformer encoder module."""
 
     def __init__(self,
-                 input_size: int,
-                 output_size: int = 256,
-                 attention_heads: int = 4,
-                 linear_units: int = 2048,
-                 num_blocks: int = 6,
-                 dropout_rate: float = 0.1,
-                 positional_dropout_rate: float = 0.1,
-                 attention_dropout_rate: float = 0.0,
-                 input_layer: str = "conv2d",
-                 pos_enc_layer_type: str = "abs_pos",
-                 normalize_before: bool = True,
-                 static_chunk_size: int = 0,
-                 use_dynamic_chunk: bool = False,
-                 global_cmvn: torch.nn.Module = None,
-                 use_dynamic_left_chunk: bool = False,
-                 key_bias: bool = True,
-                 selfattention_layer_type: str = "selfattn",
-                 activation_type: str = "relu",
-                 gradient_checkpointing: bool = False,
+                 input_size: int,  # 1024
+                 output_size: int = 256,  # 1024
+                 attention_heads: int = 4,  # 16
+                 linear_units: int = 2048,  # 4096
+                 num_blocks: int = 6,  # 14
+                 dropout_rate: float = 0.1,  # 0.1
+                 positional_dropout_rate: float = 0.1,  # 0.1
+                 attention_dropout_rate: float = 0.0,  # 0.0
+                 input_layer: str = "conv2d",  # "linear_legacy"
+                 pos_enc_layer_type: str = "abs_pos",  # rel_pos_espnet
+                 normalize_before: bool = True,  # True
+                 static_chunk_size: int = 0,  # 1
+                 use_dynamic_chunk: bool = False,  # False
+                 global_cmvn: torch.nn.Module = None,  # None
+                 use_dynamic_left_chunk: bool = False,  # False
+                 key_bias: bool = True,  # True
+                 selfattention_layer_type: str = "selfattn",  # rel_selfattn
+                 activation_type: str = "relu",  # "relu"
+                 gradient_checkpointing: bool = False,  # False
                  ):
         """ Construct TransformerEncoder
         See Encoder for the meaning of each parameter.
@@ -383,34 +383,36 @@ class TransformerEncoder(BaseEncoder):
 
 
 class ConformerEncoder(BaseEncoder):
-    """Conformer encoder module."""
+    """Conformer encoder module.
+    Used in LLM text_encoder, MaskedDiffWithXvec encoder
+    """
 
     def __init__(self,
-                 input_size: int,
-                 output_size: int = 256,
-                 attention_heads: int = 4,
-                 linear_units: int = 2048,
-                 num_blocks: int = 6,
-                 dropout_rate: float = 0.1,
-                 positional_dropout_rate: float = 0.1,
-                 attention_dropout_rate: float = 0.0,
-                 input_layer: str = "conv2d",
-                 pos_enc_layer_type: str = "rel_pos",
-                 normalize_before: bool = True,
-                 static_chunk_size: int = 0,
-                 use_dynamic_chunk: bool = False,
-                 global_cmvn: torch.nn.Module = None,
-                 use_dynamic_left_chunk: bool = False,
-                 positionwise_conv_kernel_size: int = 1,
-                 macaron_style: bool = True,
-                 selfattention_layer_type: str = "rel_selfattn",
-                 activation_type: str = "swish",
-                 use_cnn_module: bool = True,
-                 cnn_module_kernel: int = 15,
-                 causal: bool = False,
-                 cnn_module_norm: str = "batch_norm",
-                 key_bias: bool = True,
-                 gradient_checkpointing: bool = False,
+                 input_size: int,  # 512
+                 output_size: int = 256,  # 1024
+                 attention_heads: int = 4,  # 16
+                 linear_units: int = 2048,  # 4096
+                 num_blocks: int = 6,  # 6
+                 dropout_rate: float = 0.1,  # 0.1
+                 positional_dropout_rate: float = 0.1,  # 0.1
+                 attention_dropout_rate: float = 0.0,  # 0.0
+                 input_layer: str = "conv2d",  # "linear"
+                 pos_enc_layer_type: str = "rel_pos",  # "rel_pos_espnet"
+                 normalize_before: bool = True,  # True
+                 static_chunk_size: int = 0,  # 1
+                 global_cmvn: torch.nn.Module = None,  # None
+                 use_dynamic_chunk: bool = False,  # False
+                 use_dynamic_left_chunk: bool = False,  # False
+                 positionwise_conv_kernel_size: int = 1,  # 1
+                 macaron_style: bool = True,  # False
+                 selfattention_layer_type: str = "rel_selfattn",  # "rel_selfattn"
+                 activation_type: str = "swish",  # "swish"
+                 use_cnn_module: bool = True,  # False
+                 cnn_module_kernel: int = 15,  # 15
+                 causal: bool = False,  # False
+                 cnn_module_norm: str = "batch_norm",  # "batch_norm"
+                 key_bias: bool = True,  # True
+                 gradient_checkpointing: bool = False,  # False
                  ):
         """Construct ConformerEncoder
         Args:
@@ -429,52 +431,54 @@ class ConformerEncoder(BaseEncoder):
             key_bias: whether use bias in attention.linear_k, False for whisper models.
         """
 
-        super().__init__(input_size,
-                         output_size,
-                         attention_heads,
-                         linear_units,
-                         num_blocks,
-                         dropout_rate,
-                         positional_dropout_rate,
-                         attention_dropout_rate,
-                         input_layer,
-                         pos_enc_layer_type,
-                         normalize_before,
-                         static_chunk_size,
-                         use_dynamic_chunk,
-                         global_cmvn,
-                         use_dynamic_left_chunk,
-                         gradient_checkpointing)
+        super().__init__(input_size,  # 512
+                         output_size,  # 1024
+                         attention_heads,  # 16
+                         linear_units,  # 4096
+                         num_blocks,  # 6
+                         dropout_rate,  # 0.1
+                         positional_dropout_rate,  # 0.1
+                         attention_dropout_rate,  # 0.0
+                         input_layer,  # "linear"
+                         pos_enc_layer_type,  # "rel_pos_espnet"
+                         normalize_before,  # True
+                         static_chunk_size,  # 1
+                         use_dynamic_chunk,  # False
+                         global_cmvn,  # None
+                         use_dynamic_left_chunk,  # False
+                         gradient_checkpointing)  # False
+
+        # "swish"-> "Silu"
         activation = COSYVOICE_ACTIVATION_CLASSES[activation_type]()
 
         # self-attention module args definition
-        encoder_selfattn_layer = (attention_heads,
-                                  output_size,
-                                  attention_dropout_rate,
-                                  key_bias)
+        encoder_selfattn_layer = (attention_heads,  # 16
+                                  output_size,  # 1024
+                                  attention_dropout_rate,  # 0.0
+                                  key_bias)  # True
         # feed-forward module args definition
-        positionwise_layer_args = (output_size,
-                                   linear_units,
-                                   dropout_rate,
-                                   activation)
+        positionwise_layer_args = (output_size,  # 1024
+                                   linear_units,  # 4096
+                                   dropout_rate,  # 0.1
+                                   activation)  # Silu()
         # convolution module definition
-        convolution_layer_args = (output_size,
-                                  cnn_module_kernel,
-                                  activation,
-                                  cnn_module_norm,
-                                  causal)
+        convolution_layer_args = (output_size,  # 1024
+                                  cnn_module_kernel,  # 15
+                                  activation,  # Silu()
+                                  cnn_module_norm,  # "batch_norm"
+                                  causal)  # False
 
         self.encoders = nn.ModuleList([
-            ConformerEncoderLayer(output_size,
+            ConformerEncoderLayer(output_size,  # 1024
                                   COSYVOICE_ATTENTION_CLASSES[selfattention_layer_type](
                                       *encoder_selfattn_layer),
                                   PositionwiseFeedForward(
                                       *positionwise_layer_args),
                                   PositionwiseFeedForward(
-                                      *positionwise_layer_args) if macaron_style else None,
+                                      *positionwise_layer_args) if macaron_style else None,  # False
                                   ConvolutionModule(
-                                      *convolution_layer_args) if use_cnn_module else None,
-                                  dropout_rate,
-                                  normalize_before,
-                                  ) for _ in range(num_blocks)
+                                      *convolution_layer_args) if use_cnn_module else None,  # False
+                                  dropout_rate,  # 0.1
+                                  normalize_before,  # True
+                                  ) for _ in range(num_blocks)  # 6
         ])

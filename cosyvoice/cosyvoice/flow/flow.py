@@ -31,9 +31,9 @@ class MaskedDiffWithXvec(nn.Module):
                  vocab_size: int = 4096,
                  input_frame_rate: int = 50,
                  only_mask_loss: bool = True,
-                 encoder: torch.nn.Module = None,
-                 length_regulator: torch.nn.Module = None,
-                 decoder: torch.nn.Module = None,
+                 encoder: torch.nn.Module = None,  # ConformerEncoder
+                 length_regulator: torch.nn.Module = None,  # InterpolateRegulator
+                 decoder: torch.nn.Module = None,  # ConditionalCFM
                  decoder_conf: Dict = {'in_channels': 240,
                                        'out_channel': 80,
                                        'spk_emb_dim': 80,
@@ -54,20 +54,22 @@ class MaskedDiffWithXvec(nn.Module):
                                        }):
         super().__init__()
 
-        self.input_size = input_size
-        self.output_size = output_size
+        self.input_size = input_size  # 512
+        self.output_size = output_size  # 80
         self.decoder_conf = decoder_conf
-        self.vocab_size = vocab_size
-        self.output_type = output_type
-        self.input_frame_rate = input_frame_rate
+        self.vocab_size = vocab_size  # 4096
+        self.output_type = output_type  # "mel"
+        self.input_frame_rate = input_frame_rate  # 50
         logging.info(f"input frame rate={self.input_frame_rate}")
-        self.input_embedding = nn.Embedding(vocab_size, input_size)
-        self.spk_embed_affine_layer = nn.Linear(spk_embed_dim, output_size)
-        self.encoder = encoder
-        self.encoder_proj = nn.Linear(self.encoder.output_size(), output_size)
-        self.decoder = decoder
-        self.length_regulator = length_regulator
-        self.only_mask_loss = only_mask_loss
+        self.input_embedding = nn.Embedding(vocab_size, input_size)  # 4096,512
+        self.spk_embed_affine_layer = nn.Linear(
+            spk_embed_dim, output_size)  # 192,80
+        self.encoder = encoder  # ConformerEncoder
+        self.encoder_proj = nn.Linear(
+            self.encoder.output_size(), output_size)  # 512,80
+        self.decoder = decoder  # ConditionalCFM
+        self.length_regulator = length_regulator  # InterpolateRegulator
+        self.only_mask_loss = only_mask_loss  # True
 
     def forward(self,
                 batch: dict,

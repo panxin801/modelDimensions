@@ -46,13 +46,15 @@ class CosyVoice:
             configs) == CosyVoiceModel, f"do not use {model_dir} for CosyVoice initialization!"
 
         # Frontend and sr
+        # type(configs["get_tokenizer"]) is functools.partial
+        # type(configs["parquet_opener"]) is function, because parquet_opener not has args in yaml file.
         self.frontend = CosyVoiceFrontEnd(configs["get_tokenizer"],
                                           configs["feat_extractor"],
                                           f"{model_dir}/campplus.onnx",
                                           f"{model_dir}/speech_tokenizer_v1.onnx",
                                           f"{model_dir}/spk2info.pt",
                                           configs["allowed_special"])  # in this func download some wetext model and fst stuff.
-        self.sample_rate = configs["sample_rate"]
+        self.sample_rate = configs["sample_rate"]  # 22050
 
         # Set flag
         if torch.cuda.is_available() is False and (load_jit is True or load_trt is True or fp16 is True):
@@ -65,7 +67,7 @@ class CosyVoice:
         self.model = CosyVoiceModel(configs["llm"],
                                     configs["flow"],
                                     configs["hift"],
-                                    fp16)
+                                    fp16)  # False
         # load ckpt
         self.model.load(f"{model_dir}/llm.pt",
                         f"{model_dir}/flow.pt",

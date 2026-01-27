@@ -104,36 +104,36 @@ class CausalResnetBlock1D(ResnetBlock1D):
 
 class ConditionalDecoder(nn.Module):
     def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
-                 channels=(256, 256),
-                 dropout=0.05,
-                 attention_head_dim=64,
-                 n_blocks=1,
-                 num_mid_blocks=2,
-                 num_heads=4,
-                 act_fn="snake"):
+                 in_channels: int,  # 320
+                 out_channels: int,  # 80
+                 channels=(256, 256),  # [256,256]
+                 dropout=0.05,  # 0.0
+                 attention_head_dim=64,  # 64
+                 n_blocks=1,  # 4
+                 num_mid_blocks=2,  # 12
+                 num_heads=4,  # 8
+                 act_fn="snake"):  # "gelu"
         """
         This decoder requires an input with the same shape of the target. So, if your text content
         is shorter or longer than the outputs, please re - sampling it before feeding to the decoder.
         """
         super().__init__()
 
-        channels = tuple(channels)
-        self.in_channels = in_channels
-        self.out_channels = out_channels
+        channels = tuple(channels)  # (256,256)
+        self.in_channels = in_channels  # 320
+        self.out_channels = out_channels  # 80
 
-        self.time_embeddings = SinusoidalPosEmb(in_channels)
-        time_embed_dim = channels[0] * 4
-        self.time_mlp = TimestepEmbedding(in_channels=in_channels,
-                                          time_embed_dim=time_embed_dim,
+        self.time_embeddings = SinusoidalPosEmb(in_channels)  # 320
+        time_embed_dim = channels[0] * 4  # 1024
+        self.time_mlp = TimestepEmbedding(in_channels=in_channels,  # 320
+                                          time_embed_dim=time_embed_dim,  # 1024
                                           act_fn="silu")
         self.down_blocks = nn.ModuleList([])
         self.mid_blocks = nn.ModuleList([])
         self.up_blocks = nn.ModuleList([])
 
         output_channel = in_channels
-        for i in range(len(channels)):  # pylint: disable=consider-using-enumerate
+        for i in range(len(channels)):  # pylint: disable=consider-using-enumerate, (256.256)
             input_channel = output_channel
             output_channel = channels[i]
             is_last = i == len(channels) - 1

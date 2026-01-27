@@ -409,7 +409,7 @@ class HiFTGenerator(nn.Module):
                 [1, 3, 5], [1, 3, 5]],
             lrelu_slope: float = 0.1,
             audio_limit: float = 0.99,
-            f0_predictor: torch.nn.Module = None,
+            f0_predictor: torch.nn.Module = None,  # ConvRNNF0Predictor
     ):
         super(HiFTGenerator, self).__init__()
 
@@ -433,7 +433,7 @@ class HiFTGenerator(nn.Module):
             sinegen_type='1' if self.sampling_rate == 22050 else '2',
             causal=False)
         self.f0_upsamp = nn.Upsample(scale_factor=np.prod(
-            upsample_rates) * istft_params["hop_len"])
+            upsample_rates) * istft_params["hop_len"])  # 64*4
 
         self.conv_pre = weight_norm(
             nn.Conv1d(in_channels, base_channels, 7, 1, padding=3)

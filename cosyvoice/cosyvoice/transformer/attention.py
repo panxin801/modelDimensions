@@ -32,17 +32,17 @@ class MultiHeadedAttention(nn.Module):
     """
 
     def __init__(self,
-                 n_head: int,
-                 n_feat: int,
-                 dropout_rate: float,
-                 key_bias: bool = True):
+                 n_head: int,  # 16
+                 n_feat: int,  # 1024
+                 dropout_rate: float,  # 0.0
+                 key_bias: bool = True):  # True
         """Construct an MultiHeadedAttention object."""
 
         super().__init__()
         assert n_feat % n_head == 0
         # We assume d_v always equals d_k
-        self.d_k = n_feat // n_head
-        self.h = n_head
+        self.d_k = n_feat // n_head  # 64
+        self.h = n_head  # 16
 
         self.linear_q = nn.Linear(n_feat, n_feat)
         self.linear_k = nn.Linear(n_feat, n_feat, bias=key_bias)
@@ -196,10 +196,10 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
         dropout_rate (float): Dropout rate.
     """
 
-    def __init__(self, n_head: int,
-                 n_feat: int,
-                 dropout_rate: float,
-                 key_bias: bool = True):
+    def __init__(self, n_head: int,  # 16
+                 n_feat: int,  # 1024
+                 dropout_rate: float,  # 0.0
+                 key_bias: bool = True):  # True
         """Construct an RelPositionMultiHeadedAttention object."""
 
         super().__init__(n_head, n_feat, dropout_rate, key_bias)

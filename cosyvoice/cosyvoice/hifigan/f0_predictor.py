@@ -29,15 +29,16 @@ class ConvRNNF0Predictor(nn.Module):
                  ):
         super().__init__()
 
-        self.num_class = num_class
+        self.num_class = num_class  # 1
         self.condnet = nn.Sequential(
             weight_norm(
-                nn.Conv1d(in_channels, cond_channels, kernel_size=3, padding=1)
+                nn.Conv1d(in_channels, cond_channels,
+                          kernel_size=3, padding=1)  # 80,512
             ),
             nn.ELU(),
             weight_norm(
                 nn.Conv1d(cond_channels, cond_channels,
-                          kernel_size=3, padding=1)
+                          kernel_size=3, padding=1)  # 512,512
             ),
             nn.ELU(),
             weight_norm(
@@ -57,7 +58,7 @@ class ConvRNNF0Predictor(nn.Module):
             nn.ELU(),
         )
         self.classifier = nn.Linear(
-            in_features=cond_channels, out_features=self.num_class)
+            in_features=cond_channels, out_features=self.num_class)  # 512,1
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.condnet(x)

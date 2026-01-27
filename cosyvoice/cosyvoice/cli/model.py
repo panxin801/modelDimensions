@@ -32,9 +32,9 @@ from cosyvoice.utils.common import TrtContextWrapper
 
 class CosyVoiceModel:
     def __init__(self,
-                 llm: nn.Module,
-                 flow: nn.Module,
-                 hift: nn.Module,
+                 llm: nn.Module,  # TransformerLM
+                 flow: nn.Module,  # MaskedDiffWithXVec
+                 hift: nn.Module,  # HiFTGenerator
                  fp16: bool = False):
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
@@ -43,16 +43,16 @@ class CosyVoiceModel:
         self.hift = hift
         self.fp16 = fp16
 
-        self.token_min_hop_len = self.flow.input_frame_rate * 2
-        self.token_max_hop_len = self.flow.input_frame_rate * 4
+        self.token_min_hop_len = self.flow.input_frame_rate * 2  # 100
+        self.token_max_hop_len = self.flow.input_frame_rate * 4  # 200
         self.token_overlap_len = 20
         # mel fade in out
         self.mel_overlap_len = int(
-            self.token_overlap_len / self.flow.input_frame_rate * 22050 / 256)
+            self.token_overlap_len / self.flow.input_frame_rate * 22050 / 256)  # 34
         self.mel_window = np.hamming(2 * self.mel_overlap_len)
         # hift cache
         self.mel_cache_len = 20
-        self.source_cache_len = int(256 * self.mel_cache_len)
+        self.source_cache_len = int(256 * self.mel_cache_len)  # 5120
         # speech fade in out
         self.speech_window = np.hamming(2 * self.source_cache_len)
 

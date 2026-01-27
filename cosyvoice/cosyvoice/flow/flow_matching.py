@@ -23,21 +23,22 @@ from cosyvoice.utils.common import set_all_random_seed
 
 class ConditionalCFM(BASECFM):
     def __init__(self,
-                 in_channels,
+                 in_channels,  # 240
                  cfm_params,
-                 n_spks=1,
-                 spk_emb_dim=64,
-                 estimator: nn.Module = None):
+                 n_spks=1,  # 1
+                 spk_emb_dim=64,  # 80
+                 estimator: nn.Module = None):  # ConditionalDecoder
         super().__init__(n_feats=in_channels,
                          cfm_params=cfm_params,
                          n_spks=n_spks,
                          spk_emb_dim=spk_emb_dim,)
-        self.t_scheduler = cfm_params.t_scheduler
-        self.training_cfg_rate = cfm_params.training_cfg_rate
-        self.inference_cfg_rate = cfm_params.inference_cfg_rate
-        in_channels = in_channels + (spk_emb_dim if n_spks > 0 else 0)
+        self.t_scheduler = cfm_params.t_scheduler  # "cosine"
+        self.training_cfg_rate = cfm_params.training_cfg_rate  # 0.2
+        self.inference_cfg_rate = cfm_params.inference_cfg_rate  # 0.7
+        in_channels = in_channels + \
+            (spk_emb_dim if n_spks > 0 else 0)  # 240+80=320
         # Just change the architecture of the estimator here
-        self.estimator = estimator
+        self.estimator = estimator  # ConditionalDecoder
 
     @torch.inference_mode()
     def forward(self,

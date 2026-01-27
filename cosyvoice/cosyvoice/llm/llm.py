@@ -27,43 +27,47 @@ from cosyvoice.utils.file_utils import logging
 
 class TransformerLM(nn.Module):
     def __init__(self,
-                 text_encoder_input_size: int,
-                 llm_input_size: int,
-                 llm_output_size: int,
-                 text_token_size: int,
-                 speech_token_size: int,
-                 text_encoder: torch.nn.Module,
-                 llm: torch.nn.Module,
-                 sampling: Callable,
-                 length_normalized_loss: bool = True,
-                 lsm_weight: float = 0.0,
-                 spk_embed_dim: int = 192,):
+                 text_encoder_input_size: int,  # 512
+                 llm_input_size: int,  # 1024
+                 llm_output_size: int,  # 1024
+                 text_token_size: int,  # 51866
+                 speech_token_size: int,  # 4096
+                 text_encoder: torch.nn.Module,  # ConformerEncoder
+                 llm: torch.nn.Module,  # TransformerEncoder
+                 sampling: Callable,  # ras_sampling
+                 length_normalized_loss: bool = True,  # True
+                 lsm_weight: float = 0.0,  # 0
+                 spk_embed_dim: int = 192,):  # 192
         super().__init__()
 
         self.llm_input_size = llm_input_size
         self.speech_token_size = speech_token_size
         # 1. build text token inputs related modules
         self.text_embedding = nn.Embedding(
-            text_token_size, text_encoder_input_size)
+            text_token_size, text_encoder_input_size)  # 51866,512
         self.text_encoder = text_encoder
         self.text_encoder_affine_layer = nn.Linear(
-            self.text_encoder.output_size(), llm_input_size)
+            self.text_encoder.output_size(), llm_input_size)  # 1024,1024
 
         # 2. build speech token language model related modules
         self.sos = 0
         self.task_id = 1
-        self.eos_token = self.speech_token_size
+        self.eos_token = self.speech_token_size  # 4096
+        # 1024,self.llm_embedding.weight.size()=[2,1024]
         self.llm_embedding = nn.Embedding(2, llm_input_size)
-        self.llm = llm
-        self.llm_decoder = nn.Linear(llm_output_size, speech_token_size + 1)
-        self.criterion_ce = LabelSmoothingLoss(size=speech_token_size + 1,
-                                               padding_idx=IGNORE_ID,
-                                               smoothing=lsm_weight,
-                                               normalize_length=length_normalized_loss,)
+        self.llm = llm  # TransformerEncoder
+        self.llm_decoder = nn.Linear(
+            llm_output_size, speech_token_size + 1)  # 1024,4096+1
+        self.criterion_ce = LabelSmoothingLoss(size=speech_token_size + 1,  # 4096+1
+                                               padding_idx=IGNORE_ID,  # -1
+                                               smoothing=lsm_weight,  # 0
+                                               normalize_length=length_normalized_loss,)  # True
 
         # 3. [Optional] build speech token related modules
-        self.speech_embedding = nn.Embedding(speech_token_size, llm_input_size)
-        self.spk_embed_affine_layer = nn.Linear(spk_embed_dim, llm_input_size)
+        self.speech_embedding = nn.Embedding(
+            speech_token_size, llm_input_size)  # 4096,1024
+        self.spk_embed_affine_layer = nn.Linear(
+            spk_embed_dim, llm_input_size)  # 192, 1024
 
         # 4. sampling method
         self.sampling = sampling
