@@ -218,7 +218,7 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
             x (torch.Tensor): Input tensor (batch, head, time1, 2*time1-1).
             time1 means the length of query vector.
         Returns:
-            torch.Tensor: Output tensor.
+            torch.Tensor: Output tensor (batch, head, time1, 2*time1-1).
         """
         zero_pad = torch.zeros(x.size(0), x.size(1), x.size(
             2), 1, device=x.device, dtype=x.dtype)

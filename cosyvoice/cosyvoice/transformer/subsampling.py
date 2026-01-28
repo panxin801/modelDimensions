@@ -100,6 +100,7 @@ class LinearNoSubsampling(BaseSubsampling):
         Returns:
             torch.Tensor: linear input tensor (#batch, time', odim),
                 where time' = time .
+            torch.Tensor: pos embedding tensor (#batch, 2*time+2*offset-1, odim),
             torch.Tensor: linear input mask (#batch, 1, time'),
                 where time' = time .
         """

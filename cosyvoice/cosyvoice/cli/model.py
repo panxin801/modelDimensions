@@ -62,6 +62,7 @@ class CosyVoiceModel:
         self.llm_context = torch.cuda.stream(
             torch.cuda.Stream(device=self.device)) if torch.cuda.is_available() else nullcontext()
         self.lock = threading.Lock()
+
         # dict used to store session related variable
         self.tts_speech_token_dict = {}
         self.llm_end_dict = {}
@@ -132,6 +133,14 @@ class CosyVoiceModel:
                 llm_prompt_speech_token,
                 llm_embedding,
                 uuid):
+        """llm_job 目前看来是用于TTS任务的函数
+
+        :param text: target text token, [1, T_text]
+        :param prompt_text: [1,0] 就是假的
+        :param llm_prompt_speech_token: [1,0] 就是假的
+        :param llm_embedding: spk embedding, [1, 192]
+        :param uuid: str
+        """
         cur_silent_token_num, max_silent_token_num = 0, 5
         with self.llm_context, torch.autocast("cuda", enabled=self.fp16 is True and hasattr(self.llm, "vllm") is False):
             # with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
@@ -149,9 +158,9 @@ class CosyVoiceModel:
                                                                   [llm_prompt_speech_token.size(1)], dtype=torch.int).to(self.device),
                                                               embedding=llm_embedding.to(self.device),)
             else:
-                token_generator = self.llm.inference(text=text.to(self.device),
+                token_generator = self.llm.inference(text=text.to(self.device),  # [1,T_text]
                                                      text_len=torch.tensor(
-                                                         [text.size(1)], dtype=torch.int).to(self.device),
+                                                         [text.size(1)], dtype=torch.int).to(self.device),  # [1]=T_text
                                                      prompt_text=prompt_text.to(
                                                          self.device),
                                                      prompt_text_len=torch.tensor(prompt_text.size(
@@ -161,7 +170,7 @@ class CosyVoiceModel:
                                                      prompt_speech_token_len=torch.tensor(
                                                          [llm_prompt_speech_token.size(1)], dtype=torch.int).to(self.device),
                                                      embedding=llm_embedding.to(
-                                                         self.device),
+                                                         self.device),  # [1,192]
                                                      uuid=uuid)
             for i in token_generator:
                 if i in self.silent_tokens:
@@ -258,23 +267,53 @@ class CosyVoiceModel:
             stream=False,
             speed=1.0,
             **kwargs):
+        """tts main entry point
+
+        :param text: target generated text from whisper tokenizer, shape=[1, T_text], dtype=int(know as int32)
+        :param flow_embedding: spk embedding from cam++, shape=[1,192], dtype=float32
+        :param llm_embedding: spk embedding from cam++, shape=[1,192], dtype=float32
+        :param prompt_text: 说明
+        :param llm_prompt_speech_token: 说明
+        :param flow_prompt_speech_token: 说明
+        :param prompt_speech_feat: 说明
+        :param source_speech_token: 说明
+        :param stream: True for streaming inference
+        :param speed: output speech speed
+        :param kwargs: 说明
+
+        Return
+            generator: dict
+        """
+
         # this_uuid is used to track variables related to this inference thread
-        this_uuid = str(uuid.uuid1())
+        this_uuid = str(uuid.uuid1())  # str, uuid
+        """self.lock 的作用是确保对共享资源的线程安全访问。具体来说，这段代码中使用 self.lock 来保护对以下字典的初始化和修改操作：
+        self.tts_speech_token_dict[this_uuid], self.llm_end_dict[this_uuid] = [], False
+        self.hift_cache_dict[this_uuid] = None
+        self.mel_overlap_dict[this_uuid] = torch.zeros(1, 80, 0)
+        self.flow_cache_dict[this_uuid] = torch.zeros(1, 80, 0, 2)
+        没有锁 会有问题
+        竞争条件（Race Condition），数据不一致
+        """
         with self.lock:
             self.tts_speech_token_dict[this_uuid], self.llm_end_dict[this_uuid] = [
             ], False
             self.hift_cache_dict[this_uuid] = None
-            self.mel_overlap_dict[this_uuid] = torch.zeros(1, 80, 0)
-            self.flow_cache_dict[this_uuid] = torch.zeros(1, 80, 0, 2)
+            self.mel_overlap_dict[this_uuid] = torch.zeros(
+                1, 80, 0)  # [1,80,0]
+            self.flow_cache_dict[this_uuid] = torch.zeros(
+                1, 80, 0, 2)  # [1,80,0,2]
         if source_speech_token.size(1) == 0:
+            # TTS 任务, 如下外层函数会使用inference_sft
             p = threading.Thread(target=self.llm_job,
                                  args=(text, prompt_text, llm_prompt_speech_token, llm_embedding, this_uuid))
         else:
+            # VC 任务, 如下外层函数会使用
             p = threading.Thread(target=self.vc_job,
                                  args=(source_speech_token, this_uuid))
         p.start()
         if stream is True:
-            token_hop_len = self.token_min_hop_len
+            token_hop_len = self.token_min_hop_len  # 100
             while True:
                 time.sleep(1e-1)
                 if len(self.tts_speech_token_dict[this_uuid]) >= token_hop_len + self.token_overlap_len:

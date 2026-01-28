@@ -53,7 +53,7 @@ class TransformerLM(nn.Module):
         self.sos = 0
         self.task_id = 1
         self.eos_token = self.speech_token_size  # 4096
-        # 1024,self.llm_embedding.weight.size()=[2,1024]
+        # llm_input_size=1024,self.llm_embedding.weight.size()=[2,1024], used for sos symbol and task id
         self.llm_embedding = nn.Embedding(2, llm_input_size)
         self.llm = llm  # TransformerEncoder
         self.llm_decoder = nn.Linear(
@@ -74,12 +74,21 @@ class TransformerLM(nn.Module):
 
     def encode(self, text: torch.Tensor,
                text_lengths: torch.Tensor):
+        """ encode text embeddings
+        Args:
+            text: [1, T_text, 512]
+            text_lengths: [1]
+        Return:
+            encoder_out:  [1,T_text,1024]
+            encoder_out_lens: [1]=T_text
+        """
         encoder_out, encoder_mask = self.text_encoder(text,
                                                       text_lengths,
                                                       decoding_chunk_size=1,
-                                                      num_decoding_left_chunks=-1)
-        encoder_out_lens = encoder_mask.squeeze(1).sum(1)
-        encoder_out = self.text_encoder_affine_layer(encoder_out)
+                                                      num_decoding_left_chunks=-1)  # [1,T_text,1024], [1,1,T_text]
+        encoder_out_lens = encoder_mask.squeeze(1).sum(1)  # [1]=T_text
+        encoder_out = self.text_encoder_affine_layer(
+            encoder_out)  # [1,T_text,1024]
         return encoder_out, encoder_out_lens
 
     def pad_unpad_sequence(self, sos_emb,
@@ -189,38 +198,63 @@ class TransformerLM(nn.Module):
                   min_token_text_ratio: float = 2,
                   uuid: str = "",
                   ) -> Generator[torch.Tensor, None, None]:
+        """ inference of TransformerLM, used for 
+
+        :param text: target text token, [1, T_text]
+        :param text_len: [1]=T_text
+        :param prompt_text: [1,0] is fake
+        :param prompt_text_len: [1]=0 is fake
+        :param prompt_speech_token: [1,0] is fake
+        :param prompt_speech_token_len: [1]=0 is fake
+        :param embedding: spk embedding, [1,192]
+        :param sampling: 说明
+        :param max_token_text_ratio: 
+        :param min_token_text_ratio: 说明
+        :param uuid: uuid string
+
+        Return:
+            Generator[]
+        """
         device = text.device
+        # [1, T_prompt+T_text], 拼接了prompt_text and target text
         text = torch.concat([prompt_text, text], dim=1)
         text_len += prompt_text_len
-        text = self.text_embedding(text)
+        text = self.text_embedding(text)  # [ 1, T_text, 512], text embedding
 
-        # 1. encode text
+        # 1. encode text, from text embedding space to llm space,
+        # difference is llm space contains text  token and speech token
+        # [1,T_text, 1024], [1]=T_text
         text, text_len = self.encode(text, text_len)
 
         # 2. encode embedding
         if embedding.size(0) != 0:
             embedding = F.normalize(embedding, dim=1)
-            embedding = self.spk_embed_affine_layer(embedding)
-            embedding = embedding.unsqueeze(1)
+            embedding = self.spk_embed_affine_layer(embedding)  # [1,1024]
+            embedding = embedding.unsqueeze(1)  # [1,1,1024]
         else:
             embedding = torch.zeros(
                 1, 0, self.llm_input_size, dtype=text.dtype).to(device).to(text.dtype)
 
-        # 3. concat llm_input
-        sos_emb = self.llm_embedding.weight[self.sos].reshape(1, 1, -1)
-        task_id_emb = self.llm_embedding.weight[self.task_id].reshape(1, 1, -1)
+        # 3. concat llm_input, like paper figure 1
+        sos_emb = self.llm_embedding.weight[self.sos].reshape(
+            1, 1, -1)  # from [1024] -> [1,1,1024]
+        task_id_emb = self.llm_embedding.weight[self.task_id].reshape(
+            1, 1, -1)  # from [1024] -> [1,1,1024]
         if prompt_speech_token_len != 0:
             prompt_speech_token_emb = self.speech_embedding(
                 prompt_speech_token)
         else:
             prompt_speech_token_emb = torch.zeros(
-                1, 0, self.llm_input_size, dtype=text.dtype).to(device)
+                1, 0, self.llm_input_size, dtype=text.dtype).to(device)  # [1,0,1024] is fake
         lm_input = torch.concat(
             [sos_emb, embedding, text, task_id_emb, prompt_speech_token_emb], dim=1)
+        # [1,36,1024], 36=1+1+33+1+0
 
         # 4. cal min/max_length
-        min_len = int((text_len - prompt_text_len) * min_token_text_ratio)
-        max_len = int((text_len - prompt_text_len) * max_token_text_ratio)
+        min_len = int((text_len - prompt_text_len)
+                      * min_token_text_ratio)  # 33*2
+        max_len = int((text_len - prompt_text_len) *
+                      max_token_text_ratio)  # 33*20
 
         # 5. step by step decode
         out_tokens = []
@@ -228,13 +262,15 @@ class TransformerLM(nn.Module):
         att_cache, cnn_cache = torch.zeros((0, 0, 0, 0), device=lm_input.device), torch.zeros(
             (0, 0, 0, 0), device=lm_input.device)
         for i in range(max_len):
-            y_pred, att_cache, cnn_cache = self.llm.forward_chunk(lm_input,
-                                                                  offset=offset,
-                                                                  required_cache_size=-1,
-                                                                  att_cache=att_cache,
-                                                                  cnn_cache=cnn_cache,
-                                                                  att_mask=torch.tril(torch.ones((1, lm_input.shape[1], lm_input.shape[1]),
-                                                                                                 device=lm_input.device)).to(torch.bool))
+            y_pred, att_cache, cnn_cache = self.llm.forward_chunk(
+                lm_input,
+                offset=offset,
+                required_cache_size=-1,
+                att_cache=att_cache,  # [0,0,0,0]
+                cnn_cache=cnn_cache,
+                att_mask=torch.tril(torch.ones((1, lm_input.shape[1], lm_input.shape[1]),
+                                               device=lm_input.device)).to(torch.bool)
+            )
             logp = self.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
             top_ids = self.sampling_ids(logp.squeeze(
                 dim=0), out_tokens, sampling, ignore_eos=True if i < min_len else False)

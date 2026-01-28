@@ -110,7 +110,7 @@ class BaseEncoder(nn.Module):
         """Embed positions in tensor.
 
         Args:
-            xs: padded input tensor (B, T, D)
+            xs: padded input tensor (B, T, D), for inference is <prompt_text|target_text>, text embedding
             xs_lens: input length (B)
             decoding_chunk_size: decoding chunk size for dynamic chunk
                 0: default for training, use random dynamic chunk.
@@ -130,19 +130,34 @@ class BaseEncoder(nn.Module):
             checkpointing API because `__call__` attaches all the hooks of the module.
             https://discuss.pytorch.org/t/any-different-between-model-input-and-model-forward-input/3690/2
         """
-        T = xs.size(1)
-        masks = ~make_pad_mask(xs_lens, T).unsqueeze(1)  # (B,1,T)
+
+        """ For inference_sft the args are following:
+            xs: <prompt_text|target_text>, text embedding, [1,T_text, 512]
+            xs_lens: input length (B)=[T_text]
+            self.use_dynamic_chunk=False
+            self.use_dynamic_left_chunk=False
+            decoding_chunk_size: 1
+            self.static_chunk_size=1
+            num_decoding_left_chunks: -1
+        Return:
+            xs: [1,T_text,1024]
+            masks: [1,1,T_text]
+        """
+        T = xs.size(1)  # T_text
+        masks = ~make_pad_mask(xs_lens, T).unsqueeze(
+            1)  # (B,1,T_text), True means useful
         if not self.global_cmvn is None:
             xs = self.global_cmvn(xs)
+        # [1,T_text,1024], [1,2*T_text+2*offset-1,1024], [1, 1, T_text]
         xs, pos_emb, masks = self.embed(xs, masks)
-        mask_pad = masks  # (B,1, T/subsample_rate)
+        mask_pad = masks  # (B,1, T/subsample_rate)=(B,1,T_text), like len mask
         chunk_masks = add_optional_chunk_mask(xs,
                                               masks,
                                               self.use_dynamic_chunk,
                                               self.use_dynamic_left_chunk,
                                               decoding_chunk_size,
                                               self.static_chunk_size,
-                                              num_decoding_left_chunks)
+                                              num_decoding_left_chunks)  # [1, T_text, T_text], like attn mask
         if self.gradient_checkpointing and self.training:
             xs = self.forward_layers_checkpointed(
                 xs,
@@ -150,10 +165,11 @@ class BaseEncoder(nn.Module):
                 pos_emb,
                 mask_pad)
         else:
-            xs = self.forward_layers(xs,
-                                     chunk_masks,
-                                     pos_emb,
-                                     mask_pad)
+            xs = self.forward_layers(xs,  # [1,T_text,1024]
+                                     chunk_masks,  # [1,T_text,T_text]
+                                     pos_emb,  # [1, 2*T_text+2*offset-1, 1024]
+                                     mask_pad)  # [1,1,T_text]
+            # the upper line, xs has same shape as input xs
         if self.normalize_before:
             xs = self.after_norm(xs)
         # Here we assume the mask is not changed in encoder layers, so just
@@ -163,9 +179,18 @@ class BaseEncoder(nn.Module):
 
     def forward_layers(self,
                        xs: torch.Tensor,
-                       chunk_masks: torch.Tensor,
+                       chunk_masks: torch.Tensor,  # like attn mask
                        pos_emb: torch.Tensor,
-                       mask_pad: torch.Tensor,) -> torch.Tensor:
+                       mask_pad: torch.Tensor,) -> torch.Tensor:  # like len mask
+        """ Forward encoder layers.
+        Args:
+            xs: [B, T_text, 1024]
+            chunk_masks: [1, T_text, T_text], 当前chunk_mask
+            pos_emb: [B, 2*T_text+2*offset-1, 1024]
+            mask_pad: [1,1,T_text], 全局padding mask
+        Return:
+            xs: [B, T_text, 1024]
+        """
         for layer in self.encoders:
             xs, chunk_masks, _, _ = layer(xs,
                                           chunk_masks,
@@ -183,7 +208,7 @@ class BaseEncoder(nn.Module):
                       att_mask: torch.Tensor = torch.ones(
                           (0, 0, 0), dtype=torch.bool),
                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """ Forward just one chunk
+        """ Forward just one chunk, call from TransformerLM.forward_chunk()
         Args:
             xs (torch.Tensor): chunk input, with shape (b=1, time, mel-dim),
                 where `time == (chunk_size - 1) * subsample_rate + \

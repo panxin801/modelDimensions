@@ -192,6 +192,8 @@ def add_optional_chunk_mask(xs: torch.Tensor,
 
     Returns:
         torch.Tensor: chunk mask of the input xs.
+    根据是否使用动态块掩码和动态左块掩码的配置，创建块掩码 chunk_masks。
+    该掩码用于在训练和解码过程中控制信息的流动，防止模型看到未来的上下文信息。
     """
     # Whether to use chunk mask or not
     if use_dynamic_chunk:
@@ -253,6 +255,7 @@ def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
         masks = [[0, 0, 0, 0 ,0],
                  [0, 0, 0, 1, 1],
                  [0, 0, 1, 1, 1]]
+    0 is not padded part, 1 is padded part.
     """
     batch_size = lengths.size(0)
     max_len = max_len if max_len > 0 else lengths.max().item()

@@ -112,9 +112,12 @@ class CosyVoice:
 
     def inference_sft(self, tts_text, spk_id, stream=False, speed=1.0, text_frontend=True):
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend)):
+            # 上边一行是文本前端处理，下边一行是text-> text_token
             model_input = self.frontend.frontend_sft(i, spk_id)
             start_time = time.time()
             logging.info(f"synthesis text {i}")
+            # model_input is a dict with key: "text", "text_len", "llm_embedding", "flow_embedding"
+            # 下边一行是进行tts模型推理
             for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
                 speech_len = model_output["tts_speech"].size(
                     1) / self.sample_rate
