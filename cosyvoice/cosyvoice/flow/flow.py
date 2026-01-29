@@ -113,24 +113,26 @@ class MaskedDiffWithXvec(nn.Module):
 
     @torch.inference_mode()
     def inference(self,
-                  token,
-                  token_len,
-                  prompt_token,
-                  prompt_token_len,
-                  prompt_feat,
-                  prompt_feat_len,
-                  embedding,
-                  flow_cache):
+                  token,  # [1,T_token] generated token from LLM
+                  token_len,  # [1]=T_token
+                  prompt_token,  # [1,0]
+                  prompt_token_len,  # [1]=0
+                  prompt_feat,  # [1,0,80]=0
+                  prompt_feat_len,  # [1]=0
+                  embedding,  # [1,192], spk embedding
+                  flow_cache):  # [1,80,0,2] all 0 is fake
         assert token.size(0) == 1
         # xvec projection
-        embedding = F.normalize(embedding, dim=1)
-        embedding = self.spk_embed_affine_layer(embedding)
+        embedding = F.normalize(embedding, dim=1)  # [1,192]
+        embedding = self.spk_embed_affine_layer(embedding)  # [1,80]
 
         # concat speech token and prompt speech token
-        token_len1, token_len2 = prompt_token.size(1), token.size(1)
+        token_len1, token_len2 = prompt_token.size(1), token.size(1)  # 0,120
         token, token_len = torch.concat(
             [prompt_token, token], dim=1), prompt_token_len + token_len
-        mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
+        mask = (~make_pad_mask(token_len)
+                ).unsqueeze(-1).to(embedding)  # [1,120,1], float
+        # [1,T_token,512], figure1 b 中的embedding
         token = self.input_embedding(torch.clamp(token, min=0)) * mask
 
         # text encode

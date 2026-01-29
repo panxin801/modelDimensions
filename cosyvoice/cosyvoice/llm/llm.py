@@ -172,6 +172,14 @@ class TransformerLM(nn.Module):
                      decoded_tokens: List,
                      sampling: int,
                      ignore_eos: bool = True):
+        """sampling_ids 的 Docstring
+        :param weighted_scores: [4097] token generated from LLM, current token
+        :param decoded_tokens:  already generated tokens, list
+        :param sampling: 25
+        :param ignore_eos:  if ignore EOS symbol, bool
+        Return:
+            top_ids: int id
+        """
         num_trials, max_trials = 0, 100
         while True:
             top_ids = self.sampling(
@@ -207,9 +215,9 @@ class TransformerLM(nn.Module):
         :param prompt_speech_token: [1,0] is fake
         :param prompt_speech_token_len: [1]=0 is fake
         :param embedding: spk embedding, [1,192]
-        :param sampling: 说明
-        :param max_token_text_ratio: 
-        :param min_token_text_ratio: 说明
+        :param sampling: 采样用的参数
+        :param max_token_text_ratio: 最高llm 产生token数量
+        :param min_token_text_ratio: 最低llm 产生token数量
         :param uuid: uuid string
 
         Return:
@@ -219,7 +227,8 @@ class TransformerLM(nn.Module):
         # [1, T_prompt+T_text], 拼接了prompt_text and target text
         text = torch.concat([prompt_text, text], dim=1)
         text_len += prompt_text_len
-        text = self.text_embedding(text)  # [ 1, T_text, 512], text embedding
+        # [ 1, T_text, 512], text token -> text embedding
+        text = self.text_embedding(text)
 
         # 1. encode text, from text embedding space to llm space,
         # difference is llm space contains text  token and speech token
@@ -248,7 +257,7 @@ class TransformerLM(nn.Module):
                 1, 0, self.llm_input_size, dtype=text.dtype).to(device)  # [1,0,1024] is fake
         lm_input = torch.concat(
             [sos_emb, embedding, text, task_id_emb, prompt_speech_token_emb], dim=1)
-        # [1,36,1024], 36=1+1+33+1+0
+        # inference_sft: [1,36,1024], 36=1+1+33+1+0
 
         # 4. cal min/max_length
         min_len = int((text_len - prompt_text_len)
@@ -257,27 +266,49 @@ class TransformerLM(nn.Module):
                       max_token_text_ratio)  # 33*20
 
         # 5. step by step decode
-        out_tokens = []
+        out_tokens = []  # change through decode step, save generated token
         offset = 0
         att_cache, cnn_cache = torch.zeros((0, 0, 0, 0), device=lm_input.device), torch.zeros(
-            (0, 0, 0, 0), device=lm_input.device)
+            (0, 0, 0, 0), device=lm_input.device)  # change through decode step, save cache for each step
+        # att_cache is [0,0,0,0] at the beginning, cnn_cache is [0,0,0,0] at the beginning
+        # input llm input to TransformerEncoder, per token generation, and then pass through a linear layer
+        # treat as a classification task
         for i in range(max_len):
             y_pred, att_cache, cnn_cache = self.llm.forward_chunk(
+                # [1, T_text, 1024] for i=0, [1,1,1024] for i=1,2,3,4,...
                 lm_input,
+                # 0 for i=0, T_text for i=1, T_text+1 for i=2, T_text+2 for i=3, change every step...
                 offset=offset,
                 required_cache_size=-1,
-                att_cache=att_cache,  # [0,0,0,0]
+                # [0,0,0,0] for i=0, [elayer=14,16,T_text,128] for i=1, [elayer=14,16,T_text+1,128] for i=2, change every step...
+                att_cache=att_cache,
+                # [0,0,0,0] for i=0, [elayer=14,0,0,0] for i=1, [elayer=14,0,0,0] for i=2,3,4,5...
                 cnn_cache=cnn_cache,
+                # [1,T_text,T_text] for i=0, [1,1,1] for i=1,2,3,4,5....
                 att_mask=torch.tril(torch.ones((1, lm_input.shape[1], lm_input.shape[1]),
                                                device=lm_input.device)).to(torch.bool)
             )
+            # Return shape: [1,T_text,1024], [14,16,T_text,128], [14,0,0,0] for i=0,
+            # [1,1,1024], [14,16,T_text+1,128], [14,0,0,0] for i=1,
+            # [1,1,1024]. [14,16,T_text+2,128], [14,0,0,0] for i=2,
+            # ......
+
+            # [1, speech_token_size+1]
             logp = self.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
-            top_ids = self.sampling_ids(logp.squeeze(
-                dim=0), out_tokens, sampling, ignore_eos=True if i < min_len else False)
+            top_ids = self.sampling_ids(
+                logp.squeeze(dim=0),  # [4097]
+                # [] for i=0, [token1,] for i=1,change every step...
+                out_tokens,
+                sampling,  # 25
+                ignore_eos=True if i < min_len else False)
             if top_ids == self.eos_token:
                 break
             # in stream mode, yield token one by one
             yield top_ids
-            out_tokens.append(top_ids)
-            offset += lm_input.size(1)
-            lm_input = self.speech_embedding.weight[top_ids].reshape(1, 1, -1)
+            out_tokens.append(top_ids)  # all newest token to out_tokens
+            offset += lm_input.size(1)  # offset change for each i
+            # for i=0, offset=0+T_text,
+            # for i=1, offset=0+T_text+1, change every step...
+
+            lm_input = self.speech_embedding.weight[top_ids].reshape(
+                1, 1, -1)  # [1,1,1024]

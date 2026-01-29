@@ -206,13 +206,13 @@ class BaseEncoder(nn.Module):
                       att_cache: torch.Tensor = torch.zeros(0, 0, 0, 0),
                       cnn_cache: torch.Tensor = torch.zeros(0, 0, 0, 0),
                       att_mask: torch.Tensor = torch.ones(
-                          (0, 0, 0), dtype=torch.bool),
+                          (0, 0, 0), dtype=torch.bool),  # 下三角矩阵（主对脚线以上为False）
                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """ Forward just one chunk, call from TransformerLM.forward_chunk()
         Args:
             xs (torch.Tensor): chunk input, with shape (b=1, time, mel-dim),
                 where `time == (chunk_size - 1) * subsample_rate + \
-                        subsample.right_context + 1`
+                        subsample.right_context + 1`, known as [B,T_text, 1024]
             offset (int): current offset in encoder output time stamp
             required_cache_size (int): cache size required for next chunk
                 compuation
@@ -239,16 +239,25 @@ class BaseEncoder(nn.Module):
         assert xs.size(0) == 1
         # tmp_masks is just for interface compatibility
         tmp_masks = torch.ones(1, xs.size(
-            1), device=xs.device, dtype=torch.bool)
+            1), device=xs.device, dtype=torch.bool)  # [1, T_text] for first chunk,  [1, 1] for the rest
+        # [1, 1, T_text] for the first chunk,  [1, 1, 1] for the rest
         tmp_masks = tmp_masks.unsqueeze(1)
         if not self.global_cmvn is None:
             xs = self.global_cmvn(xs)
         # NOTE(xcsong): Before embed, shape(xs) is (b=1, time, mel-dim)
+        # [1, T_text, 1024], [1, 2*T_text+2*offset-1, 1024] for the first chunk
+        # [1, 1, 1024], [1, 2*T_text+2*offset-1, 1024] for the rest
         xs, pos_emb, _ = self.embed(xs, tmp_masks, offset)
         # NOTE(xcsong): After  embed, shape(xs) is (b=1, chunk_size, hidden-dim)
+        # 0, 0 for first chunk
+        # 14, 36 for second chunk
+        # 14, 37 for third chunk, ...
         elayers, cache_t1 = att_cache.size(0), att_cache.size(2)
+        # T_text for first chunk, 1 for the rest
         chunk_size = xs.size(1)
+        # T_text for first chunk, T_text+1 for second, T_text+2 for third, ...
         attention_key_size = cache_t1 + chunk_size
+        # [1, 2*T_text+2*offset-1, 1024] for the first chunk
         pos_emb = self.embed.position_encoding(offset=offset - cache_t1,
                                                size=attention_key_size)
         if required_cache_size < 0:
@@ -259,10 +268,32 @@ class BaseEncoder(nn.Module):
             next_cache_start = max(attention_key_size - required_cache_size, 0)
         r_att_cache = []
         r_cnn_cache = []
+        # TransformerLM是14层transformer,self_attn+ffn+dropout 这么简单理解吧
         for i, layer in enumerate(self.encoders):
             # NOTE(xcsong): Before layer.forward
             #   shape(att_cache[i:i + 1]) is (1, head, cache_t1, d_k * 2),
             #   shape(cnn_cache[i])       is (b=1, hidden-dim, cache_t2)
+            # First chunk
+            # xs: [1, T_text, 1024]
+            # att_mask: [1, T_text, T_text]
+            # pos_emb: [1, 2*T_text+2*offset-1, 1024] 71
+            # att_cache: [0,0,0,0]
+            # cnn_cache: [0,0,0,0]
+            # Return
+            # xs: [1, T_text, 1024]
+            # new_att_cache: [14, 16, T_text+offset, 128] 36
+            # new_cnn_cache: [14,0,0,0]
+
+            # Second chunk and later
+            # xs: [1, 1, 1024]
+            # att_mask: [1, 1, 1]
+            # pos_emb: [1, 2*T_text+2*offset-1, 1024] 73
+            # att_cache: [1,16,T_text,128] 36
+            # cnn_cache: [1,0,0,0]
+            # Return
+            # xs: [1, 1, 1024]
+            # new_att_cache: [14, 16, T_text+offset, 128] 1+36
+            # new_cnn_cache: [14, 0, 0, 0]
             xs, _, new_attn_cache, new_cnn_cache = layer(xs,
                                                          att_mask,
                                                          pos_emb,
@@ -279,8 +310,10 @@ class BaseEncoder(nn.Module):
 
         # NOTE(xcsong): shape(r_att_cache) is (elayers, head, ?, d_k * 2),
         #   ? may be larger than cache_t1, it depends on required_cache_size
+        # [14,16,T_text+offset,128]
         r_att_cache = torch.cat(r_att_cache, dim=0)
         # NOTE(xcsong): shape(r_cnn_cache) is (e, b=1, hidden-dim, cache_t2)
+        # [14,0,0,0]
         r_cnn_cache = torch.cat(r_cnn_cache, dim=0)
 
         return (xs, r_att_cache, r_cnn_cache)

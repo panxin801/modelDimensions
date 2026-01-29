@@ -197,6 +197,17 @@ class CosyVoiceModel:
                   uuid,
                   finalize=False,
                   speed=1.0):
+        """ token2wav 的 Docstring
+        :param token:  TransformerLM generated token, [1,T_token]
+        :param prompt_token: [1,0] all 0 is fake
+        :param prompt_feat: [1,0,80] all 0 is fake
+        :param embedding: [1,192], spk embedding
+        :param uuid: str
+        :param finalize: 说明
+        :param speed: 语速
+        Return: 
+            speech waveform
+        """
         with torch.autocast("cuda", enabled=self.fp16):
             tts_mel, self.flow_cache_dict[uuid] = self.flow.inference(token=token.to(self.device, dtype=torch.int),
                                                                       token_len=torch.tensor(
@@ -211,7 +222,7 @@ class CosyVoiceModel:
                                                                           [prompt_feat.size(1)], dtype=torch.int, device=self.device),
                                                                       embedding=embedding.to(
                                                                           self.device),
-                                                                      flow_cache=self.flow_cache_dict[uuid],)
+                                                                      flow_cache=self.flow_cache_dict[uuid],)  # [1,80,0,2] all 0 is fake
 
         # mel overlap fade in out
         if self.mel_overlap_dict[uuid].size(2) != 0:
@@ -313,12 +324,19 @@ class CosyVoiceModel:
                                  args=(source_speech_token, this_uuid))
         p.start()
         if stream is True:
+            # streaming
             token_hop_len = self.token_min_hop_len  # 100
             while True:
                 time.sleep(1e-1)
+                # 100, 20
                 if len(self.tts_speech_token_dict[this_uuid]) >= token_hop_len + self.token_overlap_len:
+                    # this means a llm token chunk for next pipelines
                     this_tts_speech_token = torch.tensor(
-                        self.tts_speech_token_dict[this_uuid][:token_hop_len + self.token_overlap_len]).unsqueeze(0)
+                        self.tts_speech_token_dict[this_uuid][:token_hop_len + self.token_overlap_len]).unsqueeze(0)  # [1, 120]
+                    # inference_sft
+                    # this_tts_speech_token=[1,120]
+                    # flow_prompt_speech_token=[1,0], all 0
+                    # prompt_speech_feat=[1,0,80], all 0
                     this_tts_speech = self.token2wav(token=this_tts_speech_token,
                                                      prompt_token=flow_prompt_speech_token,
                                                      prompt_feat=prompt_speech_feat,
@@ -345,7 +363,7 @@ class CosyVoiceModel:
                                              finalize=True)
             yield {"tts_speech": this_tts_speech.cpu()}
         else:
-            # deal with all tokens
+            # deal with all tokens, not streaming
             p.join()
             this_tts_speech_token = torch.tensor(
                 self.tts_speech_token_dict[this_uuid]).unsqueeze(0)
