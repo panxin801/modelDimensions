@@ -120,7 +120,7 @@ class CosyVoice:
             # 下边一行是进行tts模型推理
             for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
                 speech_len = model_output["tts_speech"].size(
-                    1) / self.sample_rate
+                    1) / self.sample_rate  # wav in time
                 logging.info(
                     f"yield speech len {speech_len}, rtf {(time.time()-start_time)/speech_len}")
                 yield model_output

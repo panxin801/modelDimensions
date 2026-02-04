@@ -235,9 +235,9 @@ class ConditionalDecoder(nn.Module):
         Args:
             x (torch.Tensor): shape (batch_size, in_channels, time)
             mask (_type_): shape (batch_size, 1, time)
-            t (_type_): shape (batch_size)
+            t (_type_): shape (batch_size, 320)
             spks (_type_, optional): shape: (batch_size, condition_channels). Defaults to None.
-            cond (_type_, optional): placeholder for future use. Defaults to None.
+            cond (_type_, optional): placeholder for future use. Defaults to None.(batch_size, in_channels, time)
         Raises:
             ValueError: _description_
             ValueError: _description_
@@ -245,82 +245,84 @@ class ConditionalDecoder(nn.Module):
             _type_: _description_
         """
 
-        t = self.time_embeddings(t).to(t.dtype)
-        t = self.time_mlp(t)
+        t = self.time_embeddings(t).to(t.dtype)  # [B,320]
+        t = self.time_mlp(t)  # [2, 1024]
 
         # cond involve in the forward pass
-        x = pack([x, mu], "b * t")[0]
+        # 这里[x1,x2] pack出来是tuple, [1] 是空的，[0]就是结果
+        x = pack([x, mu], "b * t")[0]  # [2, 160, 206]=[B, T_x+Y_mu, C]
         if not spks is None:
-            spks = repeat(spks, "b c -> b c t", t=x.shape[-1])
-            x = pack([x, spks], "b * t")[0]
+            spks = repeat(spks, "b c -> b c t", t=x.shape[-1])  # [2,80,206]
+            x = pack([x, spks], "b * t")[0]  # [2,240,206]
         if not cond is None:
-            x = pack([x, cond], "b * t")[0]
+            x = pack([x, cond], "b * t")[0]  # [2,320,206]
 
         hiddens = []
         masks = [mask]
-        for resnet, transformer_blocks, downsample in self.down_blocks:
-            mask_down = masks[-1]
-            x = resnet(x, mask_down, t)
-            x = rearrange(x, "b c t -> b t c").contiguous()
+        for resnet, transformer_blocks, downsample in self.down_blocks:  # 2个
+            mask_down = masks[-1]  # [2,1,206]
+            x = resnet(x, mask_down, t)  # [2,256, 206]
+            x = rearrange(x, "b c t -> b t c").contiguous()  # [2,206,256]
             attn_mask = add_optional_chunk_mask(x,
                                                 mask_down.bool(),
                                                 False,
                                                 False,
-                                                0, 0, -1).repeat(1, x.size(1), 1)
-            attn_mask = mask_to_bias(attn_mask, x.dtype)
-            for transformer_block in transformer_blocks:
+                                                0, 0, -1).repeat(1, x.size(1), 1)  # [2,206,206]
+            attn_mask = mask_to_bias(attn_mask, x.dtype)  # [2,206,206]
+            for transformer_block in transformer_blocks:  # 4个
                 x = transformer_block(hidden_states=x,
                                       attention_mask=attn_mask,
-                                      timestep=t)
-            x = rearrange(x, "b t c -> b c t").contiguous()
+                                      timestep=t)  # [2,206,256]
+            x = rearrange(x, "b t c -> b c t").contiguous()  # [2,256,206]
             hiddens.append(x)  # Save hidden states for skip connections
-            x = downsample(x * mask_down)
+            x = downsample(x * mask_down)  # [2,256,103]
             masks.append(mask_down[:, :, ::2])
-        masks = masks[:-1]
-        mask_mid = masks[-1]
+        masks = masks[:-1]  # len(masks)=2, masks[0].size()=[2,1,206]
+        mask_mid = masks[-1]  # [2,1,103]
 
-        for resnet, transformer_blocks in self.mid_blocks:
-            x = resnet(x, mask_mid, t)
-            x = rearrange(x, "b c t -> b t c").contiguous()
+        for resnet, transformer_blocks in self.mid_blocks:  # 12个
+            x = resnet(x, mask_mid, t)  # [2,256,103]
+            x = rearrange(x, "b c t -> b t c").contiguous()  # [2,103,256]
             attn_mask = add_optional_chunk_mask(
                 x,
                 mask_mid.bool(),
                 False,
                 False,
-                0, 0, -1).repeat(1, x.size(1), 1)
-            attn_mask = mask_to_bias(attn_mask, x.dtype)
-            for transformer_block in transformer_blocks:
+                0, 0, -1).repeat(1, x.size(1), 1)  # [2,103,103]
+            attn_mask = mask_to_bias(attn_mask, x.dtype)  # [2,103,103]
+            for transformer_block in transformer_blocks:  # 4个
                 x = transformer_block(
                     hidden_states=x,
                     attention_mask=attn_mask,
                     timestep=t,
-                )
-            x = rearrange(x, "b t c -> b c t").contiguous()
+                )  # [2,103,256]
+            x = rearrange(x, "b t c -> b c t").contiguous()  # [2,256,103]
 
-        for resnet, transformer_blocks, upsample in self.up_blocks:
-            mask_up = masks.pop()
-            skip = hiddens.pop()
-            x = pack([x[:, :, :skip.shape[-1]], skip], "b * t")[0]
-            x = resnet(x, mask_up, t)
-            x = rearrange(x, "b c t -> b t c").contiguous()
+        for resnet, transformer_blocks, upsample in self.up_blocks:  # 2个
+            mask_up = masks.pop()  # from downblocks, [2,1,103]
+            skip = hiddens.pop()  # from downblocks, [2,256,103]
+            x = pack([x[:, :, :skip.shape[-1]], skip],
+                     "b * t")[0]  # from mid blocks, [2,512,103]
+            x = resnet(x, mask_up, t)  # [2,256,103]
+            x = rearrange(x, "b c t -> b t c").contiguous()  # [2,103,256]
             attn_mask = add_optional_chunk_mask(
                 x,
                 mask_up.bool(),
                 False,
                 False,
-                0, 0, -1).repeat(1, x.size(1), 1)
-            attn_mask = mask_to_bias(attn_mask, x.dtype)
-            for transformer_block in transformer_blocks:
+                0, 0, -1).repeat(1, x.size(1), 1)  # [2,103,103]
+            attn_mask = mask_to_bias(attn_mask, x.dtype)  # [2,103,103]
+            for transformer_block in transformer_blocks:  # 4个
                 x = transformer_block(
                     hidden_states=x,
                     attention_mask=attn_mask,
                     timestep=t,
                 )
             x = rearrange(x, "b t c -> b c t").contiguous()
-            x = upsample(x * mask_up)
-        x = self.final_block(x, mask_up)
-        output = self.final_proj(x * mask_up)
-        return output * mask
+            x = upsample(x * mask_up)  # [2,256,206]
+        x = self.final_block(x, mask_up)  # [2,256,206]
+        output = self.final_proj(x * mask_up)  # [2,80,206]
+        return output * mask  # [2,80,206]
 
 
 class CausalConditionalDecoder(ConditionalDecoder):

@@ -302,7 +302,7 @@ class TransformerLM(nn.Module):
                 sampling,  # 25
                 ignore_eos=True if i < min_len else False)
             if top_ids == self.eos_token:
-                break
+                break  # 运行到这里退出函数
             # in stream mode, yield token one by one
             yield top_ids
             out_tokens.append(top_ids)  # all newest token to out_tokens

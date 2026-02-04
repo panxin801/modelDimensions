@@ -48,7 +48,7 @@ class CosyVoiceModel:
         self.token_overlap_len = 20
         # mel fade in out
         self.mel_overlap_len = int(
-            self.token_overlap_len / self.flow.input_frame_rate * 22050 / 256)  # 34
+            self.token_overlap_len / self.flow.input_frame_rate * 22050 / 256)  # 34，20 token 对应34帧的mel
         self.mel_window = np.hamming(2 * self.mel_overlap_len)
         # hift cache
         self.mel_cache_len = 20
@@ -143,7 +143,6 @@ class CosyVoiceModel:
         """
         cur_silent_token_num, max_silent_token_num = 0, 5
         with self.llm_context, torch.autocast("cuda", enabled=self.fp16 is True and hasattr(self.llm, "vllm") is False):
-            # with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
             if isinstance(text, Generator):
                 assert (self.__class__.__name__ !=
                         "CosyVoiceModel") and not hasattr(self.llm, "vllm"), f"streaming input text is only implemented for CosyVoice2/3 and do not support vllm!"
@@ -223,13 +222,14 @@ class CosyVoiceModel:
                                                                       embedding=embedding.to(
                                                                           self.device),
                                                                       flow_cache=self.flow_cache_dict[uuid],)  # [1,80,0,2] all 0 is fake
+            # tts_mel.size()=[1,80,206]
 
         # mel overlap fade in out
         if self.mel_overlap_dict[uuid].size(2) != 0:
             tts_mel = fade_in_out(
                 tts_mel,
                 self.mel_overlap_dict[uuid],
-                self.mel_window)
+                self.mel_window)  # 68
         # append hift cache
         if not self.hift_cache_dict[uuid] is None:
             hift_cache_mel, hift_cache_source = self.hift_cache_dict[
@@ -240,10 +240,10 @@ class CosyVoiceModel:
         # keep overlap mel and hift cache
         if finalize is False:
             self.mel_overlap_dict[uuid] = tts_mel[:,
-                                                  :, -self.mel_overlap_len:]
-            tts_mel = tts_mel[:, :, :-self.mel_overlap_len]
+                                                  :, -self.mel_overlap_len:]  # [1,80,-34]
+            tts_mel = tts_mel[:, :, :-self.mel_overlap_len]  # [1,80,172]
             tts_speech, tts_source = self.hift.inference(
-                speech_feat=tts_mel, cache_source=hift_cache_source)
+                speech_feat=tts_mel, cache_source=hift_cache_source)  # [1,44032],[1,1,44032]
             if not self.hift_cache_dict[uuid] is None:
                 tts_speech = fade_in_out(tts_speech,
                                          self.hift_cache_dict[uuid]["speech"],
@@ -251,6 +251,7 @@ class CosyVoiceModel:
             self.hift_cache_dict[uuid] = {"mel": tts_mel[:, :, -self.mel_cache_len:],
                                           "source": tts_source[:, :, -self.source_cache_len:],
                                           "speech": tts_speech[:, -self.source_cache_len:]}
+            # [1, 44032-5120]=[1,38912]
             tts_speech = tts_speech[:, :-self.source_cache_len]
         else:
             if speed != 1.0:
@@ -264,7 +265,7 @@ class CosyVoiceModel:
                 tts_speech = fade_in_out(tts_speech,
                                          self.hift_cache_dict[uuid]["speech"],
                                          self.speech_window)
-        return tts_speech
+        return tts_speech  # [1,38912]
 
     def tts(self,
             text=torch.zeros(1, 0, dtype=torch.int32),
@@ -376,6 +377,7 @@ class CosyVoiceModel:
                                              speed=speed)
             yield {"tts_speech": this_tts_speech.cpu()}
         with self.lock:
+            print(f"{self.tts_speech_token_dict=}")
             self.tts_speech_token_dict.pop(this_uuid)
             self.llm_end_dict.pop(this_uuid)
             self.mel_overlap_dict.pop(this_uuid)

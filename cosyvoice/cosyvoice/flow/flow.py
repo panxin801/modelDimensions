@@ -115,9 +115,9 @@ class MaskedDiffWithXvec(nn.Module):
     def inference(self,
                   token,  # [1,T_token] generated token from LLM
                   token_len,  # [1]=T_token
-                  prompt_token,  # [1,0]
+                  prompt_token,  # [1,0], prompt speech token
                   prompt_token_len,  # [1]=0
-                  prompt_feat,  # [1,0,80]=0
+                  prompt_feat,  # [1,0,80]=0, prompt speech mel-feat
                   prompt_feat_len,  # [1]=0
                   embedding,  # [1,192], spk embedding
                   flow_cache):  # [1,80,0,2] all 0 is fake
@@ -136,27 +136,34 @@ class MaskedDiffWithXvec(nn.Module):
         token = self.input_embedding(torch.clamp(token, min=0)) * mask
 
         # text encode
+        # [B,T_token,512],[1,1,T_token]
         h, h_lengths = self.encoder(token, token_len)
-        h = self.encoder_proj(h)
+        h = self.encoder_proj(h)  # [B,T_token,80]
         mel_len1, mel_len2 = prompt_feat.shape[1], int(
-            token_len2 / self.input_frame_rate * 22050 / 256)
+            token_len2 / self.input_frame_rate * 22050 / 256)  # 0, 206
         h, h_lengths = self.length_regulator.inference(
-            h[:, :token_len1], h[:, token_len1:], mel_len1, mel_len2, self.input_frame_rate)
+            h[:, :token_len1], h[:, token_len1:], mel_len1, mel_len2, self.input_frame_rate)  # [1, mel_len1+mel_len2, 80], mel_len1+mel_len2=206
 
         # get conditions
         conds = torch.zeros(
-            [1, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)
+            [1, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)  # [1, 206, 80]
         conds[:, :mel_len1] = prompt_feat
-        conds = conds.transpose(1, 2)
+        conds = conds.transpose(1, 2)  # [1, 80,mel_len1+mel_len2]
 
+        # [1, mel_len1+mel_len2]
         mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2]))).to(h)
+        # next line corresonds to the  Fig1.C in the paper
+        # conditions formed like <v|mu|x_mask|x_t>
+        # mu is semantic tokens, concat prompt_token and llm generated token,
+        # x_mask is masked speech feat,
+        # x_t is intermediate state at timestep t.
         feat, flow_cache = self.decoder(mu=h.transpose(1, 2).contiguous(),
                                         mask=mask.unsqueeze(1),
                                         spks=embedding,
                                         cond=conds,
                                         n_timesteps=10,
                                         prompt_len=mel_len1,
-                                        cache=flow_cache)
-        feat = feat[:, :, mel_len1:]
+                                        cache=flow_cache)  # flow_cache=[1,80,34,2]
+        feat = feat[:, :, mel_len1:]  # [1,80,206]
         assert feat.shape[2] == mel_len2
         return feat.float(), flow_cache
