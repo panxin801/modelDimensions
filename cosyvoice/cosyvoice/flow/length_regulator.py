@@ -53,15 +53,16 @@ class InterpolateRegulator(nn.Module):
     def inference(self, x1, x2, mel_len1, mel_len2, input_frame_rate=50):
         # in inference mode, interploate prompt token and token(head/mid/tail) seprately, so we can get a clear separation point of mel
         # NOTE 20 corresponds to token_overlap_len in cosyvoice/cli/model.py
-        # x in (B, T, D)
+        # x in (B, T_token, D)
         if x2.shape[1] > 40:
             x2_head = F.interpolate(x2[:, :20].transpose(1, 2).contiguous(), size=int(
-                20 / input_frame_rate * 22050 / 256), mode='linear')
+                20 / input_frame_rate * 22050 / 256), mode='linear')  # 20 token overlap -> 34 mel frames
             x2_mid = F.interpolate(x2[:, 20:-20].transpose(1, 2).contiguous(), size=mel_len2 - int(20 / input_frame_rate * 22050 / 256) * 2,
-                                   mode='linear')
+                                   mode='linear')  # 中间80 token -> 138 mel frames
             x2_tail = F.interpolate(x2[:, -20:].transpose(1, 2).contiguous(), size=int(
-                20 / input_frame_rate * 22050 / 256), mode='linear')
-            x2 = torch.concat([x2_head, x2_mid, x2_tail], dim=2)
+                20 / input_frame_rate * 22050 / 256), mode='linear')  # 末尾20 token -> 34 mel frames
+            x2 = torch.concat([x2_head, x2_mid, x2_tail],
+                              dim=2)  # T维度是mel的，但是内容都是token的
         else:
             x2 = F.interpolate(x2.transpose(1, 2).contiguous(),
                                size=mel_len2, mode='linear')
@@ -71,5 +72,5 @@ class InterpolateRegulator(nn.Module):
             x = torch.concat([x1, x2], dim=2)
         else:
             x = x2
-        out = self.model(x).transpose(1, 2).contiguous()
+        out = self.model(x).transpose(1, 2).contiguous()  # [B,T_mel,D]
         return out, mel_len1 + mel_len2

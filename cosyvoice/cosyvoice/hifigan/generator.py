@@ -577,16 +577,27 @@ class HiFTGenerator(nn.Module):
 
     @torch.inference_mode()
     def inference(self, speech_feat: torch.Tensor, cache_source: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
-        # mel->f0
-        f0 = self.f0_predictor(speech_feat)  # [1,172]
-        # f0->source
-        s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t, [1,44032,1]
-        s, _, _ = self.m_source(s)  # [1,44032,1]
-        s = s.transpose(1, 2)  # [1,1,44032]
+        """ from mel to wav samples
+        Args:
+            speech_feat: [B, D, T_mel]
+            cache_source:
+        Returns:
+            generated_speech: [B, T_wav]
+            s: [B, 1, T_wav]
+        """
+        # mel->f0, 估计每帧的f0
+        f0 = self.f0_predictor(speech_feat)  # [1,T_mel]
+        # f0->source, 从f0生成源信号。通常源信号由基频和谐波组成。
+        s = self.f0_upsamp(f0[:, None]).transpose(
+            1, 2)  # bs,n,t, [1,T_wav,1], 将f0从T_mel上采样到T_wav长度。T_wav=T_mel*(64*4)来自参数
+        s, _, _ = self.m_source(s)  # [1,T_wav,1]， 从T_wav f0信号生成源信号。
+        s = s.transpose(1, 2)  # [1,1,T_wav]
         # use cache_source to avoid glitch
         if cache_source.shape[2] != 0:
+            # cache_souce来自上个chunk的最后。这里拼在最开始
             s[:, :, :cache_source.shape[2]] = cache_source
-        generated_speech = self.decode(x=speech_feat, s=s)  # [1,44032]
+        # self.decode将语音特征speech_feat和源信号s合成语音。
+        generated_speech = self.decode(x=speech_feat, s=s)  # [1,T_wav]
         return generated_speech, s
 
 

@@ -51,7 +51,7 @@ class CosyVoiceModel:
             self.token_overlap_len / self.flow.input_frame_rate * 22050 / 256)  # 34，20 token 对应34帧的mel
         self.mel_window = np.hamming(2 * self.mel_overlap_len)
         # hift cache
-        self.mel_cache_len = 20
+        self.mel_cache_len = 20  # mel_cache_len和mel_overlap_len无关，当前参数只用于hift计算。
         self.source_cache_len = int(256 * self.mel_cache_len)  # 5120
         # speech fade in out
         self.speech_window = np.hamming(2 * self.source_cache_len)
@@ -222,36 +222,49 @@ class CosyVoiceModel:
                                                                       embedding=embedding.to(
                                                                           self.device),
                                                                       flow_cache=self.flow_cache_dict[uuid],)  # [1,80,0,2] all 0 is fake
-            # tts_mel.size()=[1,80,206]
+            # tts_mel.size()=[1,80,206]， T_token对应的T_mel
+            # 第一次self.flow_cache_dict[uuid]是假的。flow.inference运行过一次，self.flow_cache_dict[uuid]是[1,80,34,2], 34=mel_overlap_len
 
-        # mel overlap fade in out
+        # mel overlap fade in out，让拼接部分的mel更自然
         if self.mel_overlap_dict[uuid].size(2) != 0:
             tts_mel = fade_in_out(
                 tts_mel,
-                self.mel_overlap_dict[uuid],
-                self.mel_window)  # 68
+                self.mel_overlap_dict[uuid],  # 来自上一个chunk
+                self.mel_window)  # 68，mel_overlap_dict后1/2 mel_window 和tts_mel前1/2 mel_windows求和。
         # append hift cache
         if not self.hift_cache_dict[uuid] is None:
             hift_cache_mel, hift_cache_source = self.hift_cache_dict[
-                uuid]["mel"], self.hift_cache_dict[uuid]["source"]
-            tts_mel = torch.concat([hift_cache_mel, tts_mel], dim=2)  # !!!!!!
+                uuid]["mel"], self.hift_cache_dict[uuid]["source"]  # 来自上一个chunk, [1,80,mel_cache_len=20], [1,1,5120]
+            # 下边的hift_cache_mel 来自上个chunk,和tts_mel拼一起效果好。
+            tts_mel = torch.concat(
+                [hift_cache_mel, tts_mel], dim=2)  # [1,80,206+20]=[T_mel+mel_cache_len]
         else:
             hift_cache_source = torch.zeros(1, 1, 0)
         # keep overlap mel and hift cache
         if finalize is False:
-            self.mel_overlap_dict[uuid] = tts_mel[:,
-                                                  :, -self.mel_overlap_len:]  # [1,80,-34]
-            tts_mel = tts_mel[:, :, :-self.mel_overlap_len]  # [1,80,172]
+            # tts_mel本身是[1,80,206] 这里拿的[1,80,-34:]去做mel_overlap_dict,
+            # mel_overlap_dict存的是tts_mel中llm token_overlap_len(那20 token)对应的mel帧用于mel缓存。
+            # self.mel_overlap_dict[uuid]用于和上边生成的tts_mel进行拼接
+            self.mel_overlap_dict[uuid] = tts_mel[:, :, -self.mel_overlap_len:]
+            # 如果hift_cache_dict不是空，则tts_mel会concate hift_cache_mel，tts_mel的长度就是206+20=226
+            # 下边[1,80,172], tts_mel的除去最后34帧作为新的tts_mel参与hift.inference。如果hift_cache_dict不是空tts_mel=[1,80,192]
+            tts_mel = tts_mel[:, :, :-self.mel_overlap_len]
             tts_speech, tts_source = self.hift.inference(
-                speech_feat=tts_mel, cache_source=hift_cache_source)  # [1,44032],[1,1,44032]
+                speech_feat=tts_mel, cache_source=hift_cache_source)  # [1,44032],[1,1,44032]。如果hift_cache_dict不是空tts_speech=[1.49152]
+            # self.hift.inference 不做缓存有关操作，进入hift.inference的tts_mel是[1,80,172]最开始的172帧
             if not self.hift_cache_dict[uuid] is None:
                 tts_speech = fade_in_out(tts_speech,
+                                         # self.hift_cache_dict[uuid]["speech"]来自上一个chunk
                                          self.hift_cache_dict[uuid]["speech"],
                                          self.speech_window)
-            self.hift_cache_dict[uuid] = {"mel": tts_mel[:, :, -self.mel_cache_len:],
+            self.hift_cache_dict[uuid] = {"mel": tts_mel[:, :, -self.mel_cache_len:],  # 刚才新的tts_mel的最后20帧作为hift_cache。和token_overlap 无关
+                                          # 这20帧其实是最开始tts_mel的[1,80,152:172]，因为[1,80,172:206]已经去做mel_overlap_dict了。
+                                          # 这部分存储的值其实是用于hift.inference的mel cache
                                           "source": tts_source[:, :, -self.source_cache_len:],
-                                          "speech": tts_speech[:, -self.source_cache_len:]}
-            # [1, 44032-5120]=[1,38912]
+                                          # tts_source 最后5120点作为cache, 5120=20*256=self.mel_cache_len*mel_hop_len
+                                          "speech": tts_speech[:, -self.source_cache_len:]}  # tts_speech 最后5120点作为cache
+            # [1, 44032-5120]=[1,38912]=[1, T_wav]
+            # tts_speech除去最后5120点以外作为新的tts_speech，因为最后5120点去做cache了，用于下次inference
             tts_speech = tts_speech[:, :-self.source_cache_len]
         else:
             if speed != 1.0:
@@ -265,7 +278,7 @@ class CosyVoiceModel:
                 tts_speech = fade_in_out(tts_speech,
                                          self.hift_cache_dict[uuid]["speech"],
                                          self.speech_window)
-        return tts_speech  # [1,38912]
+        return tts_speech  # [1,T_wav]
 
     def tts(self,
             text=torch.zeros(1, 0, dtype=torch.int32),
@@ -329,9 +342,9 @@ class CosyVoiceModel:
             token_hop_len = self.token_min_hop_len  # 100
             while True:
                 time.sleep(1e-1)
-                # 100, 20
+                # 100 token hop len, 20 token overlap
                 if len(self.tts_speech_token_dict[this_uuid]) >= token_hop_len + self.token_overlap_len:
-                    # this means a llm token chunk for next pipelines
+                    # this means a llm token chunk for next chunk inference
                     this_tts_speech_token = torch.tensor(
                         self.tts_speech_token_dict[this_uuid][:token_hop_len + self.token_overlap_len]).unsqueeze(0)  # [1, 120]
                     # inference_sft
@@ -346,6 +359,8 @@ class CosyVoiceModel:
                                                      finalize=False)
                     yield {"tts_speech": this_tts_speech.cpu()}
                     with self.lock:
+                        # token2wav生成的wav 对应前100（100=token_hop_len）token, 输入的确是120 token。因为第100-120 token的内容去做了各种cache。
+                        # 这里也是pop掉前100 token，只留后上个chunk中overlap以及以后的部分
                         self.tts_speech_token_dict[this_uuid] = self.tts_speech_token_dict[this_uuid][token_hop_len:]
                     # increase token_hop_len for better speech quality
                     token_hop_len = min(self.token_max_hop_len, int(

@@ -131,9 +131,10 @@ class MaskedDiffWithXvec(nn.Module):
         token, token_len = torch.concat(
             [prompt_token, token], dim=1), prompt_token_len + token_len
         mask = (~make_pad_mask(token_len)
-                ).unsqueeze(-1).to(embedding)  # [1,120,1], float
+                ).unsqueeze(-1).to(embedding)  # [1,120,1], float， make_pad_mask 本身是0 not pad，但是这里取反就是0（False）是pad。
         # [1,T_token,512], figure1 b 中的embedding
-        token = self.input_embedding(torch.clamp(token, min=0)) * mask
+        token = self.input_embedding(torch.clamp(
+            token, min=0)) * mask  # 乘mask去掉占位值的影响。
 
         # text encode
         # [B,T_token,512],[1,1,T_token]
@@ -141,6 +142,7 @@ class MaskedDiffWithXvec(nn.Module):
         h = self.encoder_proj(h)  # [B,T_token,80]
         mel_len1, mel_len2 = prompt_feat.shape[1], int(
             token_len2 / self.input_frame_rate * 22050 / 256)  # 0, 206
+        # 使用 length_regulator 对编码后的中间表示 h 进行长度调节，使其在时间维度上与目标梅尔频谱长度匹配。
         h, h_lengths = self.length_regulator.inference(
             h[:, :token_len1], h[:, token_len1:], mel_len1, mel_len2, self.input_frame_rate)  # [1, mel_len1+mel_len2, 80], mel_len1+mel_len2=206
 
@@ -151,10 +153,11 @@ class MaskedDiffWithXvec(nn.Module):
         conds = conds.transpose(1, 2)  # [1, 80,mel_len1+mel_len2]
 
         # [1, mel_len1+mel_len2]
-        mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2]))).to(h)
+        mask = (~make_pad_mask(torch.tensor(
+            [mel_len1 + mel_len2]))).to(h)  # 1 意味着没pad
         # next line corresonds to the  Fig1.C in the paper
         # conditions formed like <v|mu|x_mask|x_t>
-        # mu is semantic tokens, concat prompt_token and llm generated token,
+        # mu is semantic tokens, concat prompt_token and llm generated token, 这是在
         # x_mask is masked speech feat,
         # x_t is intermediate state at timestep t.
         feat, flow_cache = self.decoder(mu=h.transpose(1, 2).contiguous(),
@@ -163,7 +166,7 @@ class MaskedDiffWithXvec(nn.Module):
                                         cond=conds,
                                         n_timesteps=10,
                                         prompt_len=mel_len1,
-                                        cache=flow_cache)  # flow_cache=[1,80,34,2]
-        feat = feat[:, :, mel_len1:]  # [1,80,206]
+                                        cache=flow_cache)  # return flow_cache=[1,80,34,2]
+        feat = feat[:, :, mel_len1:]  # [1,80,206]， 取的prompt_feat拼接后的部分。
         assert feat.shape[2] == mel_len2
         return feat.float(), flow_cache
