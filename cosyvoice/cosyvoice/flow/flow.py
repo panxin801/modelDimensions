@@ -124,22 +124,25 @@ class MaskedDiffWithXvec(nn.Module):
         assert token.size(0) == 1
         # xvec projection
         embedding = F.normalize(embedding, dim=1)  # [1,192]
-        embedding = self.spk_embed_affine_layer(embedding)  # [1,80]
+        embedding = self.spk_embed_affine_layer(
+            embedding)  # [1,80], v in fig1.C
 
-        # concat speech token and prompt speech token
+        # concat prompt token and generated token
         token_len1, token_len2 = prompt_token.size(1), token.size(1)  # 0,120
         token, token_len = torch.concat(
             [prompt_token, token], dim=1), prompt_token_len + token_len
         mask = (~make_pad_mask(token_len)
                 ).unsqueeze(-1).to(embedding)  # [1,120,1], float， make_pad_mask 本身是0 not pad，但是这里取反就是0（False）是pad。
-        # [1,T_token,512], figure1 b 中的embedding
+        # [1,T_token,512], figure1 b 中的不确定是什么，不确定是mu还是x_t ！！！！！！！！！！！！！！！！！！！11
         token = self.input_embedding(torch.clamp(
             token, min=0)) * mask  # 乘mask去掉占位值的影响。
 
         # text encode
-        # [B,T_token,512],[1,1,T_token]
+        # [B,T_token,512],[1,1,T_token]， token经过ConformerEncoder
         h, h_lengths = self.encoder(token, token_len)
         h = self.encoder_proj(h)  # [B,T_token,80]
+
+        # 从h中分出那些frame是prompt_token对应的，那些是generated token对应的。
         mel_len1, mel_len2 = prompt_feat.shape[1], int(
             token_len2 / self.input_frame_rate * 22050 / 256)  # 0, 206
         # 使用 length_regulator 对编码后的中间表示 h 进行长度调节，使其在时间维度上与目标梅尔频谱长度匹配。
@@ -148,17 +151,18 @@ class MaskedDiffWithXvec(nn.Module):
 
         # get conditions
         conds = torch.zeros(
-            [1, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)  # [1, 206, 80]
+            [1, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)  # [1, mel_len1+mel_len2=206, 80]
         conds[:, :mel_len1] = prompt_feat
+        # conds=prompt_feat后边是mel_len2长度都是0。
         conds = conds.transpose(1, 2)  # [1, 80,mel_len1+mel_len2]
 
         # [1, mel_len1+mel_len2]
         mask = (~make_pad_mask(torch.tensor(
             [mel_len1 + mel_len2]))).to(h)  # 1 意味着没pad
         # next line corresonds to the  Fig1.C in the paper
-        # conditions formed like <v|mu|x_mask|x_t>
-        # mu is semantic tokens, concat prompt_token and llm generated token, 这是在
-        # x_mask is masked speech feat,
+        # conditions formed like <v|mu|mask_speech_feat>
+        # mu is semantic tokens, concat prompt_token and llm generated token
+        # mask_speech_feat is masked speech feat,
         # x_t is intermediate state at timestep t.
         feat, flow_cache = self.decoder(mu=h.transpose(1, 2).contiguous(),
                                         mask=mask.unsqueeze(1),

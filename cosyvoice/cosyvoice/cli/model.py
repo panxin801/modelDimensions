@@ -225,13 +225,13 @@ class CosyVoiceModel:
             # tts_mel.size()=[1,80,206]， T_token对应的T_mel
             # 第一次self.flow_cache_dict[uuid]是假的。flow.inference运行过一次，self.flow_cache_dict[uuid]是[1,80,34,2], 34=mel_overlap_len
 
-        # mel overlap fade in out，让拼接部分的mel更自然
+        # mel overlap fade in out，让拼接部分的mel更自然。mel_overlap_dict存档的用于和下个chunk一开始合并
         if self.mel_overlap_dict[uuid].size(2) != 0:
             tts_mel = fade_in_out(
                 tts_mel,
                 self.mel_overlap_dict[uuid],  # 来自上一个chunk
-                self.mel_window)  # 68，mel_overlap_dict后1/2 mel_window 和tts_mel前1/2 mel_windows求和。
-        # append hift cache
+                self.mel_window)  # 68，mel_overlap_dict后1/2 mel_window 和tts_mel前1/2 mel_windows加窗求和。
+        # append hift cache，上一个hift_result结果中留下的20帧mel和其对应的wav sample，用于和下一个chunk的tts_mel拼接进hift.inference以及wav 结果fade in out。
         if not self.hift_cache_dict[uuid] is None:
             hift_cache_mel, hift_cache_source = self.hift_cache_dict[
                 uuid]["mel"], self.hift_cache_dict[uuid]["source"]  # 来自上一个chunk, [1,80,mel_cache_len=20], [1,1,5120]
@@ -242,11 +242,11 @@ class CosyVoiceModel:
             hift_cache_source = torch.zeros(1, 1, 0)
         # keep overlap mel and hift cache
         if finalize is False:
-            # tts_mel本身是[1,80,206] 这里拿的[1,80,-34:]去做mel_overlap_dict,
+            # tts_mel本身是[1,80,T_mel=206] 这里拿的[1,80,-34:]去做mel_overlap_dict,
             # mel_overlap_dict存的是tts_mel中llm token_overlap_len(那20 token)对应的mel帧用于mel缓存。
             # self.mel_overlap_dict[uuid]用于和上边生成的tts_mel进行拼接
             self.mel_overlap_dict[uuid] = tts_mel[:, :, -self.mel_overlap_len:]
-            # 如果hift_cache_dict不是空，则tts_mel会concate hift_cache_mel，tts_mel的长度就是206+20=226
+            # 如果hift_cache_dict不是空，则tts_mel会concate hift_cache_mel，tts_mel的长度就是206+20=226,T_mel+mel_cache_len
             # 下边[1,80,172], tts_mel的除去最后34帧作为新的tts_mel参与hift.inference。如果hift_cache_dict不是空tts_mel=[1,80,192]
             tts_mel = tts_mel[:, :, :-self.mel_overlap_len]
             tts_speech, tts_source = self.hift.inference(

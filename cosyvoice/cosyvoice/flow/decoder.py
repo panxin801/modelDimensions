@@ -117,6 +117,8 @@ class ConditionalDecoder(nn.Module):
         This decoder requires an input with the same shape of the target. So, if your text content
         is shorter or longer than the outputs, please re - sampling it before feeding to the decoder.
         """
+        """ 类似于U-Net的条件解码器，用于处理一维数据，并根据输入的条件信息生成输出
+        """
         super().__init__()
 
         channels = tuple(channels)  # (256,256)
@@ -233,23 +235,37 @@ class ConditionalDecoder(nn.Module):
                 streaming=False):
         """Forward pass of the UNet1DConditional model.
         Args:
-            x (torch.Tensor): shape (batch_size, in_channels, time)
+            x (torch.Tensor): shape (batch_size, in_channels, time), noise 
             mask (_type_): shape (batch_size, 1, time)
-            t (_type_): shape (batch_size, 320)
+            t (_type_): shape (batch_size), time_stamp
             spks (_type_, optional): shape: (batch_size, condition_channels). Defaults to None.
-            cond (_type_, optional): placeholder for future use. Defaults to None.(batch_size, in_channels, time)
+            cond (_type_, optional): placeholder for future use. Defaults to None.(batch_size, in_channels, time), speech_mel_spec
+            mu (torch.Tensor): shape (batch_size, D, T_mel), token in T_mel dimension
         Raises:
             ValueError: _description_
             ValueError: _description_
         Returns:
             _type_: _description_
+        计算过程参考论文Fig1.C
         """
 
+        # time stamp to time embedding
         t = self.time_embeddings(t).to(t.dtype)  # [B,320]
         t = self.time_mlp(t)  # [2, 1024]
 
         # cond involve in the forward pass
         # 这里[x1,x2] pack出来是tuple, [1] 是空的，[0]就是结果
+        # b * t 是b 任意 t的意思
+        # 将x和mu在特征维度拼接，也就是[B, noise|token,T_mel]的样子
+
+        """ 那么是不是论文中的参数和这里对应下：
+        v: spks
+        mu: mu, semantic token
+        x^=cond, mel_spec
+        x_t=x, noise
+        t=t, time stamp
+        """
+
         x = pack([x, mu], "b * t")[0]  # [2, 160, 206]=[B, T_x+Y_mu, C]
         if not spks is None:
             spks = repeat(spks, "b c -> b c t", t=x.shape[-1])  # [2,80,206]
@@ -257,12 +273,13 @@ class ConditionalDecoder(nn.Module):
         if not cond is None:
             x = pack([x, cond], "b * t")[0]  # [2,320,206]
 
-        hiddens = []
-        masks = [mask]
+        hiddens = []  # hidden states list
+        masks = [mask]  # mask list
         for resnet, transformer_blocks, downsample in self.down_blocks:  # 2个
             mask_down = masks[-1]  # [2,1,206]
             x = resnet(x, mask_down, t)  # [2,256, 206]
             x = rearrange(x, "b c t -> b t c").contiguous()  # [2,206,256]
+            # 创建attn_mask并转换为attn 偏执形式
             attn_mask = add_optional_chunk_mask(x,
                                                 mask_down.bool(),
                                                 False,
@@ -274,10 +291,13 @@ class ConditionalDecoder(nn.Module):
                                       attention_mask=attn_mask,
                                       timestep=t)  # [2,206,256]
             x = rearrange(x, "b t c -> b c t").contiguous()  # [2,256,206]
-            hiddens.append(x)  # Save hidden states for skip connections
+            # Save hidden states for skip connections，保存当前特征作为隐藏状态
+            hiddens.append(x)
+            # 下采样，并更新掩码列表
             x = downsample(x * mask_down)  # [2,256,103]
             masks.append(mask_down[:, :, ::2])
-        masks = masks[:-1]  # len(masks)=2, masks[0].size()=[2,1,206]
+        # masks[0].size()=[2,1,206], masks[1].size()=[2,1,103], masks[2].size()=[2,1,52]
+        masks = masks[:-1]  # len(masks)=2,
         mask_mid = masks[-1]  # [2,1,103]
 
         for resnet, transformer_blocks in self.mid_blocks:  # 12个
@@ -301,6 +321,7 @@ class ConditionalDecoder(nn.Module):
         for resnet, transformer_blocks, upsample in self.up_blocks:  # 2个
             mask_up = masks.pop()  # from downblocks, [2,1,103]
             skip = hiddens.pop()  # from downblocks, [2,256,103]
+            # 拼接当前特征和skip
             x = pack([x[:, :, :skip.shape[-1]], skip],
                      "b * t")[0]  # from mid blocks, [2,512,103]
             x = resnet(x, mask_up, t)  # [2,256,103]
@@ -321,7 +342,7 @@ class ConditionalDecoder(nn.Module):
             x = rearrange(x, "b t c -> b c t").contiguous()
             x = upsample(x * mask_up)  # [2,256,206]
         x = self.final_block(x, mask_up)  # [2,256,206]
-        output = self.final_proj(x * mask_up)  # [2,80,206]
+        output = self.final_proj(x * mask_up)  # [2,80,206], 利用mask去掉没用的时间步
         return output * mask  # [2,80,206]
 
 
