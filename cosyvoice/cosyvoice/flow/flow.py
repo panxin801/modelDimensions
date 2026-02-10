@@ -117,60 +117,65 @@ class MaskedDiffWithXvec(nn.Module):
                   token_len,  # [1]=T_token
                   prompt_token,  # [1,0], prompt speech token
                   prompt_token_len,  # [1]=0
-                  prompt_feat,  # [1,0,80]=0, prompt speech mel-feat
+                  prompt_feat,  # [1,0,80]=0, prompt speech mel_spec
                   prompt_feat_len,  # [1]=0
                   embedding,  # [1,192], spk embedding
                   flow_cache):  # [1,80,0,2] all 0 is fake
         assert token.size(0) == 1
-        # xvec projection
+        # xvec projection, from cam++
         embedding = F.normalize(embedding, dim=1)  # [1,192]
         embedding = self.spk_embed_affine_layer(
             embedding)  # [1,80], v in fig1.C
 
-        # concat prompt token and generated token
+        # concat prompt token and generated token, in semantic token level
         token_len1, token_len2 = prompt_token.size(1), token.size(1)  # 0,120
         token, token_len = torch.concat(
             [prompt_token, token], dim=1), prompt_token_len + token_len
+        # mask是semantic token level的
         mask = (~make_pad_mask(token_len)
                 ).unsqueeze(-1).to(embedding)  # [1,120,1], float， make_pad_mask 本身是0 not pad，但是这里取反就是0（False）是pad。
-        # [1,T_token,512], figure1 b 中的不确定是什么，不确定是mu还是x_t ！！！！！！！！！！！！！！！！！！！11
+        # [1,T_token,512], figure1.b 中llm 产生的token过的embedding layer
         token = self.input_embedding(torch.clamp(
             token, min=0)) * mask  # 乘mask去掉占位值的影响。
 
-        # text encode
+        # 从这里开始可以认为是Fig1.C的部分
+        # semantic token encode
         # [B,T_token,512],[1,1,T_token]， token经过ConformerEncoder
         h, h_lengths = self.encoder(token, token_len)
         h = self.encoder_proj(h)  # [B,T_token,80]
 
-        # 从h中分出那些frame是prompt_token对应的，那些是generated token对应的。
+        # 将h从semantic token level 扩展到mel_spec level, T_token -> T_mel
+        # 由于semantic token是prompt_token|llm generated token的。因此扩展到mel_spec维度也是prompt_mel|llm generated mel的长度格式。
         mel_len1, mel_len2 = prompt_feat.shape[1], int(
             token_len2 / self.input_frame_rate * 22050 / 256)  # 0, 206
         # 使用 length_regulator 对编码后的中间表示 h 进行长度调节，使其在时间维度上与目标梅尔频谱长度匹配。
+        # h[:, :token_len1] 扩展到mel_len1长度，h[:, token_len1:] 扩展到mel_len2长度
         h, h_lengths = self.length_regulator.inference(
             h[:, :token_len1], h[:, token_len1:], mel_len1, mel_len2, self.input_frame_rate)  # [1, mel_len1+mel_len2, 80], mel_len1+mel_len2=206
 
         # get conditions
         conds = torch.zeros(
-            [1, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)  # [1, mel_len1+mel_len2=206, 80]
+            [1, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)  # [B,T_mel,D]=[1, mel_len1+mel_len2=206, 80]
         conds[:, :mel_len1] = prompt_feat
         # conds=prompt_feat后边是mel_len2长度都是0。
-        conds = conds.transpose(1, 2)  # [1, 80,mel_len1+mel_len2]
+        conds = conds.transpose(1, 2)  # [B,D,T_mel]=[1, 80,mel_len1+mel_len2]
 
         # [1, mel_len1+mel_len2]
         mask = (~make_pad_mask(torch.tensor(
             [mel_len1 + mel_len2]))).to(h)  # 1 意味着没pad
-        # next line corresonds to the  Fig1.C in the paper
+        # next lines corresond to the  Fig1.C in the paper
         # conditions formed like <v|mu|mask_speech_feat>
-        # mu is semantic tokens, concat prompt_token and llm generated token
-        # mask_speech_feat is masked speech feat,
-        # x_t is intermediate state at timestep t.
-        feat, flow_cache = self.decoder(mu=h.transpose(1, 2).contiguous(),
-                                        mask=mask.unsqueeze(1),
-                                        spks=embedding,
-                                        cond=conds,
+        # v is speaker embedding, here is embedding
+        # mu is semantic tokens, concat prompt_token and llm generated token, here is h
+        # mask_speech_feat is masked speech mel_spec, here is conds
+        # x_t is intermediate state at timestep t. The noise in the self.decoder
+        feat, flow_cache = self.decoder(mu=h.transpose(1, 2).contiguous(),  # [B,D, T_mel]
+                                        mask=mask.unsqueeze(1),  # [B,1,T_mel]
+                                        spks=embedding,  # [B，80]
+                                        cond=conds,  # [B,D,T_mel]
                                         n_timesteps=10,
-                                        prompt_len=mel_len1,
-                                        cache=flow_cache)  # return flow_cache=[1,80,34,2]
+                                        prompt_len=mel_len1,  # int
+                                        cache=flow_cache)  # return flow_cache=[1,80,34,2]=[B,D,prompt_len+34(mel_overlap_len),2],2 =z_cache and mu_cache
         feat = feat[:, :, mel_len1:]  # [1,80,206]， 取的prompt_feat拼接后的部分。
         assert feat.shape[2] == mel_len2
         return feat.float(), flow_cache

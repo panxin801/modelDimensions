@@ -236,7 +236,7 @@ class ConditionalDecoder(nn.Module):
         """Forward pass of the UNet1DConditional model.
         Args:
             x (torch.Tensor): shape (batch_size, in_channels, time), noise 
-            mask (_type_): shape (batch_size, 1, time)
+            mask (_type_): shape (batch_size, 1, time), mel_spec dim
             t (_type_): shape (batch_size), time_stamp
             spks (_type_, optional): shape: (batch_size, condition_channels). Defaults to None.
             cond (_type_, optional): placeholder for future use. Defaults to None.(batch_size, in_channels, time), speech_mel_spec
@@ -258,15 +258,15 @@ class ConditionalDecoder(nn.Module):
         # b * t 是b 任意 t的意思
         # 将x和mu在特征维度拼接，也就是[B, noise|token,T_mel]的样子
 
-        """ 那么是不是论文中的参数和这里对应下：
+        """ 论文中的参数和这里对应下：
         v: spks
-        mu: mu, semantic token
+        mu: semantic token in mel_spec dim
         x^=cond, mel_spec
-        x_t=x, noise
+        x_t=x, noise. intermediate state
         t=t, time stamp
         """
 
-        x = pack([x, mu], "b * t")[0]  # [2, 160, 206]=[B, T_x+Y_mu, C]
+        x = pack([x, mu], "b * t")[0]  # [2, 160, 206]=[B, D_x+D_mu, T_mel]
         if not spks is None:
             spks = repeat(spks, "b c -> b c t", t=x.shape[-1])  # [2,80,206]
             x = pack([x, spks], "b * t")[0]  # [2,240,206]
@@ -276,29 +276,37 @@ class ConditionalDecoder(nn.Module):
         hiddens = []  # hidden states list
         masks = [mask]  # mask list
         for resnet, transformer_blocks, downsample in self.down_blocks:  # 2个
-            mask_down = masks[-1]  # [2,1,206]
-            x = resnet(x, mask_down, t)  # [2,256, 206]
-            x = rearrange(x, "b c t -> b t c").contiguous()  # [2,206,256]
-            # 创建attn_mask并转换为attn 偏执形式
+            mask_down = masks[-1]  # [2,1,T=206],T changes
+            x = resnet(x, mask_down, t)  # [2,256, T=206],T changes
+            # [2,T=206,256],T changes
+            x = rearrange(x, "b c t -> b t c").contiguous()
+            # 创建attn_mask并转换为attn 偏置形式
             attn_mask = add_optional_chunk_mask(x,
                                                 mask_down.bool(),
                                                 False,
                                                 False,
-                                                0, 0, -1).repeat(1, x.size(1), 1)  # [2,206,206]
-            attn_mask = mask_to_bias(attn_mask, x.dtype)  # [2,206,206]
+                                                0, 0, -1).repeat(1, x.size(1), 1)  # [2,T=206,T=206],T changes
+            # 在注意力机制中，掩码通常用于防止模型关注某些不需要关注的位置（如未来的步骤或被填充的步骤）。
+            # 通过将掩码转换为偏置形式，可以更方便地在计算注意力分数时应用这些限制。
+            # attn_mask 中的掩码值转换为负无穷（-inf）或者其他合适的低值，以在计算注意力分数时忽略这些位置。
+            # 例如，如果 attn_mask 中的某个位置被标记为 0，那么在计算注意力分数时，这个位置的分数会被设置为 -inf，从而不会被选择。
+            # [2,206,206]， 填充值的mask是-1e10。
+            attn_mask = mask_to_bias(attn_mask, x.dtype)
             for transformer_block in transformer_blocks:  # 4个
                 x = transformer_block(hidden_states=x,
                                       attention_mask=attn_mask,
-                                      timestep=t)  # [2,206,256]
-            x = rearrange(x, "b t c -> b c t").contiguous()  # [2,256,206]
+                                      timestep=t)  # [2,T=206,256],T changes
+            # [2,256,T=206],T changes
+            x = rearrange(x, "b t c -> b c t").contiguous()
             # Save hidden states for skip connections，保存当前特征作为隐藏状态
             hiddens.append(x)
             # 下采样，并更新掩码列表
-            x = downsample(x * mask_down)  # [2,256,103]
+            x = downsample(x * mask_down)  # [2,256,T=103],T changes
             masks.append(mask_down[:, :, ::2])
         # masks[0].size()=[2,1,206], masks[1].size()=[2,1,103], masks[2].size()=[2,1,52]
-        masks = masks[:-1]  # len(masks)=2,
-        mask_mid = masks[-1]  # [2,1,103]
+        # before this op len(masks)=3, after this op len(masks)=2
+        masks = masks[:-1]
+        mask_mid = masks[-1]  # [2,1,T=103],T changes
 
         for resnet, transformer_blocks in self.mid_blocks:  # 12个
             x = resnet(x, mask_mid, t)  # [2,256,103]
@@ -319,20 +327,23 @@ class ConditionalDecoder(nn.Module):
             x = rearrange(x, "b t c -> b c t").contiguous()  # [2,256,103]
 
         for resnet, transformer_blocks, upsample in self.up_blocks:  # 2个
-            mask_up = masks.pop()  # from downblocks, [2,1,103]
-            skip = hiddens.pop()  # from downblocks, [2,256,103]
+            # from downblocks, [2,1,T=103] for the first time, [2,1,206] for the second time
+            mask_up = masks.pop()
+            skip = hiddens.pop()  # from downblocks, [2,256,T=103],T changes
             # 拼接当前特征和skip
             x = pack([x[:, :, :skip.shape[-1]], skip],
-                     "b * t")[0]  # from mid blocks, [2,512,103]
-            x = resnet(x, mask_up, t)  # [2,256,103]
-            x = rearrange(x, "b c t -> b t c").contiguous()  # [2,103,256]
+                     "b * t")[0]  # from mid blocks, [2,512,T=103],T changes
+            x = resnet(x, mask_up, t)  # [2,256,T=103],T changes
+            # [2,T=103,256],T changes
+            x = rearrange(x, "b c t -> b t c").contiguous()
             attn_mask = add_optional_chunk_mask(
                 x,
                 mask_up.bool(),
                 False,
                 False,
-                0, 0, -1).repeat(1, x.size(1), 1)  # [2,103,103]
-            attn_mask = mask_to_bias(attn_mask, x.dtype)  # [2,103,103]
+                0, 0, -1).repeat(1, x.size(1), 1)  # [2,T=103,T=103],T changes
+            # [2,T=103,T=103],T changes
+            attn_mask = mask_to_bias(attn_mask, x.dtype)
             for transformer_block in transformer_blocks:  # 4个
                 x = transformer_block(
                     hidden_states=x,
@@ -340,9 +351,9 @@ class ConditionalDecoder(nn.Module):
                     timestep=t,
                 )
             x = rearrange(x, "b t c -> b c t").contiguous()
-            x = upsample(x * mask_up)  # [2,256,206]
-        x = self.final_block(x, mask_up)  # [2,256,206]
-        output = self.final_proj(x * mask_up)  # [2,80,206], 利用mask去掉没用的时间步
+            x = upsample(x * mask_up)  # [2,256,T=206]
+        x = self.final_block(x, mask_up)  # [2,256,T=206]
+        output = self.final_proj(x * mask_up)  # [2,80,T=206], 利用mask去掉没用的时间步
         return output * mask  # [2,80,206]
 
 

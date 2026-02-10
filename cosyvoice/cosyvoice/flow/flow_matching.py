@@ -55,32 +55,36 @@ class ConditionalCFM(BASECFM):
         Args:
             mu (torch.Tensor): output of encoder, concate prompt_token and llm generated token
                 shape: (batch_size, n_feats, mel_timesteps)
-            mask (torch.Tensor): output_mask
+            mask (torch.Tensor): output_mask, in mel_spec shape
                 shape: (batch_size, 1, mel_timesteps)
             n_timesteps (int): number of diffusion steps
             temperature (float, optional): temperature for scaling noise. Defaults to 1.0.
             spks (torch.Tensor, optional): speaker ids. Defaults to None.
-                shape: (batch_size, spk_emb_dim)
-            cond: Not used but kept for future purposes, [B,D,T_mel]
+                shape: (batch_size, spk_emb_dim)mel_len1: 是0
+            cond: Not used but kept for future purposes, [B,D,T_mel],
         Returns:
             sample: generated mel-spectrogram
                 shape: (batch_size, n_feats, mel_timesteps)
         """
-        # torch.randn_like 和torch.rand_like 结果差别大了
+        # torch.randn_like 和torch.rand_like 结果差别大了, [B,D,T_mel]
+        # mu的构成相当于<prompt_token|上个chunk的mel_overklap|当前mel|下个mel_overlap>相当于有这几个部分构成，其中有的部分在例如第一或者最后chunk是没有的。
         z = torch.randn_like(mu).to(mu.device).to(mu.dtype) * temperature
         # cache.size=[B,D,T,2], 2=z_cache and mu_cache
         cache_size = cache.size(2)
         # fix prompt and overlap part mu and z
-        # 如果 cache 的大小不为零，则从 cache 中读取之前存储的 z 和 mu 的部分值，并替换当前生成的噪声 z 和 mu 的相应部分。
+        # 如果 cache 的大小不为零，则从 cache 中读取之前存储的 z 和 mu 的cache，并替换当前生成的噪声 z 和 mu 的相应部分。固定随机数，稳定复现。
         if cache_size != 0:
             z[:, :, :cache_size] = cache[:, :, :, 0]
             mu[:, :, :cache_size] = cache[:, :, :, 1]
-        # 将当前的 z 和 mu 的提示部分和最后 34 个时间步提取出来，并拼接成新的缓存 cache。34帧mel_spec对应20 overlap tokens.
+        # 将当前的 z 和 mu 的prompt(提示)部分和最后 34 个时间步提取出来，并拼接成新的缓存 cache。34帧mel_spec对应20 overlap tokens.
+        # 简单说就是prompt部分和mel_spec_overlap部分做了缓存。-34: 存下来用于下个chunk推理使用。这个chunk的-34帧，在下个chunk正好是:34（最开始的34帧），
+        # 下个chunk的缓存恢复操作就在上边的if 中完成了，相当于<prompt_token|上个chunk的mel_overklap>部分都恢复了。<当前mel|下个mel_overlap>都是当前新产生的，然后被用于下边的新cache的存储。
         z_cache = torch.concat(
             [z[:, :, :prompt_len], z[:, :, -34:]], dim=2)  # [1,80, 34]
         mu_cache = torch.concat(
             [mu[:, :, :prompt_len], mu[:, :, -34:]], dim=2)  # [1,80, 34]
-        cache = torch.stack([z_cache, mu_cache], dim=-1)  # [1, 80, 34,2]
+        # [B,D,T,2]=[1, 80, 34,2]
+        cache = torch.stack([z_cache, mu_cache], dim=-1)
 
         t_span = torch.linspace(0, 1, n_timesteps + 1,
                                 device=mu.device, dtype=mu.dtype)  # construct flow matching time steps, [n_timesteps+1]
@@ -101,7 +105,7 @@ class ConditionalCFM(BASECFM):
                 shape: (batch_size, 1, mel_timesteps)
             spks (torch.Tensor, optional): speaker ids. Defaults to None.
                 shape: (batch_size, spk_emb_dim)
-            cond: Not used but kept for future purposes, [batch_size, n_feats, mel_timesteps]
+            cond: Not used but kept for future purposes, [batch_size, n_feats, mel_timesteps], mel_spec, mel_len1: 是0
         """
         t, _, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
         t = t.unsqueeze(dim=0)
@@ -112,7 +116,7 @@ class ConditionalCFM(BASECFM):
 
         # Do not use concat, it may cause memory format changed and trt infer with wrong results!
         # NOTE when flow run in amp mode, x.dtype is float32, which cause nan in trt fp16 inference, so set dtype=spks.dtype
-        # 这里第0个维度（batch）是2。相当于2个副本，因为要进行CFG推理，
+        # 这里第0个维度（batch）是2。相当于2个副本，因为要进行CFG推理（无条件推理），和有条件推理
         x_in = torch.zeros([2, 80, x.size(2)],
                            device=x.device, dtype=spks.dtype)  # [B, 80, mel_timesteps]
         mask_in = torch.zeros(
@@ -130,8 +134,9 @@ class ConditionalCFM(BASECFM):
             # x_in=[2,80,206],x=[1,80,206]，x_in[:]=x相当于把x复制到x_in[0]和x_in[1]中。
             x_in[:] = x  # [2,80,206]
             mask_in[:] = mask  # [1,1,206]
-            mu_in[0] = mu  # [2,80,206], [0]有值
             t_in[:] = t.unsqueeze(0)
+            # following lines are total conditions
+            mu_in[0] = mu  # [2,80,206], [0]有值
             spks_in[0] = spks  # [0]有值
             cond_in[0] = cond  # [0]有值
             dphi_dt = self.forward_estimator(
