@@ -239,7 +239,7 @@ class BaseEncoder(nn.Module):
         assert xs.size(0) == 1
         # tmp_masks is just for interface compatibility
         tmp_masks = torch.ones(1, xs.size(
-            1), device=xs.device, dtype=torch.bool)  # [1, T_text] for first chunk,  [1, 1] for the rest
+            1), device=xs.device, dtype=torch.bool)  # [1, T_text=107] for first chunk,  [1, T_text=1] for the rest
         # [1, 1, T_text] for the first chunk,  [1, 1, 1] for the rest
         tmp_masks = tmp_masks.unsqueeze(1)
         if not self.global_cmvn is None:
@@ -250,14 +250,13 @@ class BaseEncoder(nn.Module):
         xs, pos_emb, _ = self.embed(xs, tmp_masks, offset)
         # NOTE(xcsong): After  embed, shape(xs) is (b=1, chunk_size, hidden-dim)
         # 0, 0 for first chunk
-        # 14, 36 for second chunk
-        # 14, 37 for third chunk, ...
+        # 14, offset for second chunk and later
         elayers, cache_t1 = att_cache.size(0), att_cache.size(2)
         # T_text for first chunk, 1 for the rest
         chunk_size = xs.size(1)
-        # T_text for first chunk, T_text+1 for second, T_text+2 for third, ...
+        # T_text for first chunk, offset+1 for the rest
         attention_key_size = cache_t1 + chunk_size
-        # [1, 2*T_text+2*offset-1, 1024] for the first chunk
+        # [1, 2*T_text+2*offset-1, 1024]
         pos_emb = self.embed.position_encoding(offset=offset - cache_t1,
                                                size=attention_key_size)
         if required_cache_size < 0:
@@ -274,25 +273,25 @@ class BaseEncoder(nn.Module):
             #   shape(att_cache[i:i + 1]) is (1, head, cache_t1, d_k * 2),
             #   shape(cnn_cache[i])       is (b=1, hidden-dim, cache_t2)
             # First chunk
-            # xs: [1, T_text, 1024]
+            # xs: [1, T_text=107, 1024],
             # att_mask: [1, T_text, T_text]
-            # pos_emb: [1, 2*T_text+2*offset-1, 1024] 71
+            # pos_emb: [1, 2*T_text+2*offset-1, 1024] 213
             # att_cache: [0,0,0,0]
             # cnn_cache: [0,0,0,0]
             # Return
             # xs: [1, T_text, 1024]
-            # new_att_cache: [14, 16, T_text+offset, 128] 36
+            # new_att_cache: [14, 16, T_text+offset, 128]
             # new_cnn_cache: [14,0,0,0]
 
             # Second chunk and later
             # xs: [1, 1, 1024]
             # att_mask: [1, 1, 1]
-            # pos_emb: [1, 2*T_text+2*offset-1, 1024] 73
-            # att_cache: [1,16,T_text,128] 36
+            # pos_emb: [1, 2*T_text+2*offset-1, 1024] 215
+            # att_cache: [1,16,offset,128] 107
             # cnn_cache: [1,0,0,0]
             # Return
             # xs: [1, 1, 1024]
-            # new_att_cache: [14, 16, T_text+offset, 128] 1+36
+            # new_att_cache: [14, 16, T_text+offset, 128] 1+107
             # new_cnn_cache: [14, 0, 0, 0]
             xs, _, new_attn_cache, new_cnn_cache = layer(xs,
                                                          att_mask,

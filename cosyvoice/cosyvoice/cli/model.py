@@ -327,7 +327,7 @@ class CosyVoiceModel:
             self.mel_overlap_dict[this_uuid] = torch.zeros(
                 1, 80, 0)  # [1,80,0]
             self.flow_cache_dict[this_uuid] = torch.zeros(
-                1, 80, 0, 2)  # [1,80,0,2]
+                1, 80, 0, 2)  # [1,80,0,2], cache z和mu
         if source_speech_token.size(1) == 0:
             # TTS 任务, 如下外层函数会使用inference_sft
             p = threading.Thread(target=self.llm_job,
