@@ -198,8 +198,8 @@ class CosyVoiceModel:
                   speed=1.0):
         """ token2wav 的 Docstring
         :param token:  TransformerLM generated token, [1,T_token]
-        :param prompt_token: [1,0] all 0 is fake
-        :param prompt_feat: [1,0,80] all 0 is fake
+        :param prompt_token: [1,0] all 0 is fake, [1, T_prompt_token=174]
+        :param prompt_feat: [1,0,80] all 0 is fake, [1, T_prompt_mel=326,80]
         :param embedding: [1,192], spk embedding
         :param uuid: str
         :param finalize: 说明
@@ -351,6 +351,11 @@ class CosyVoiceModel:
                     # this_tts_speech_token=[1,120]
                     # flow_prompt_speech_token=[1,0], all 0
                     # prompt_speech_feat=[1,0,80], all 0
+
+                    # inference_zero_shot
+                    # this_tts_speech_token=[1,120]
+                    # flow_prompt_speech_token=[1,174]
+                    # prompt_speech_feat=[1,326,80]
                     this_tts_speech = self.token2wav(token=this_tts_speech_token,
                                                      prompt_token=flow_prompt_speech_token,
                                                      prompt_feat=prompt_speech_feat,

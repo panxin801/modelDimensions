@@ -115,9 +115,11 @@ class MaskedDiffWithXvec(nn.Module):
     def inference(self,
                   token,  # [1,T_token] generated token from LLM
                   token_len,  # [1]=T_token
-                  prompt_token,  # [1,0], prompt speech token
+                  # [1,0], prompt speech token, [1, T_prompt_token=174]
+                  prompt_token,
                   prompt_token_len,  # [1]=0
-                  prompt_feat,  # [1,0,80]=0, prompt speech mel_spec
+                  # [1,0,80]=0, prompt speech mel_spec, [1, T_prompt_mel=326, 80]
+                  prompt_feat,
                   prompt_feat_len,  # [1]=0
                   embedding,  # [1,192], spk embedding
                   flow_cache):  # [1,80,0,2] all 0 is fake
@@ -128,7 +130,8 @@ class MaskedDiffWithXvec(nn.Module):
             embedding)  # [1,80], v in fig1.C
 
         # concat prompt token and generated token, in semantic token level
-        token_len1, token_len2 = prompt_token.size(1), token.size(1)  # 0,120
+        token_len1, token_len2 = prompt_token.size(
+            1), token.size(1)  # 0,120. 174,120
         token, token_len = torch.concat(
             [prompt_token, token], dim=1), prompt_token_len + token_len
         # mask是semantic token level的
@@ -147,7 +150,7 @@ class MaskedDiffWithXvec(nn.Module):
         # 将h从semantic token level 扩展到mel_spec level, T_token -> T_mel
         # 由于semantic token是prompt_token|llm generated token的。因此扩展到mel_spec维度也是prompt_mel|llm generated mel的长度格式。
         mel_len1, mel_len2 = prompt_feat.shape[1], int(
-            token_len2 / self.input_frame_rate * 22050 / 256)  # 0, 206
+            token_len2 / self.input_frame_rate * 22050 / 256)  # 0, 206. 326,206
         # 使用 length_regulator 对编码后的中间表示 h 进行长度调节，使其在时间维度上与目标梅尔频谱长度匹配。
         # h[:, :token_len1] 扩展到mel_len1长度，h[:, token_len1:] 扩展到mel_len2长度
         h, h_lengths = self.length_regulator.inference(

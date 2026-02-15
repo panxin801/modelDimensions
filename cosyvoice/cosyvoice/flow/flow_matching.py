@@ -80,10 +80,10 @@ class ConditionalCFM(BASECFM):
         # 简单说就是prompt部分和mel_spec_overlap部分做了缓存。-34: 存下来用于下个chunk推理使用。这个chunk的-34帧，在下个chunk正好是:34（最开始的34帧），
         # 下个chunk的缓存恢复操作就在上边的if 中完成了，相当于<prompt_token|上个chunk的mel_overklap>部分都恢复了。<当前mel|下个mel_overlap>都是当前新产生的，然后被用于下边的新cache的存储。
         z_cache = torch.concat(
-            [z[:, :, :prompt_len], z[:, :, -34:]], dim=2)  # [1,80, 34]
+            [z[:, :, :prompt_len], z[:, :, -34:]], dim=2)  # [1,80, 34]. [1,80,326+34=380]
         mu_cache = torch.concat(
-            [mu[:, :, :prompt_len], mu[:, :, -34:]], dim=2)  # [1,80, 34]
-        # [B,D,T,2]=[1, 80, 34,2]
+            [mu[:, :, :prompt_len], mu[:, :, -34:]], dim=2)  # [1,80, 34]. [1,80,326+34=380]
+        # [B,D,T,2]=[1, 80, 34,2]. [1,80,360,2]
         cache = torch.stack([z_cache, mu_cache], dim=-1)
 
         t_span = torch.linspace(0, 1, n_timesteps + 1,

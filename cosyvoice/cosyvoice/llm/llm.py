@@ -262,9 +262,9 @@ class TransformerLM(nn.Module):
 
         # 4. cal min/max_length
         min_len = int((text_len - prompt_text_len)
-                      * min_token_text_ratio)  # 33*2
+                      * min_token_text_ratio)  # 33*2, (81-16)*2
         max_len = int((text_len - prompt_text_len) *
-                      max_token_text_ratio)  # 33*20
+                      max_token_text_ratio)  # 33*20, (81-16)*20
 
         # 5. step by step decode
         out_tokens = []  # change through decode step, save generated token
