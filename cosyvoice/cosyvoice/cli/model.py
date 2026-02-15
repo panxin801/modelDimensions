@@ -136,9 +136,9 @@ class CosyVoiceModel:
         """llm_job 目前看来是用于TTS任务的函数
 
         :param text: target text token, [1, T_text]
-        :param prompt_text: [1,0] 就是假的
-        :param llm_prompt_speech_token: [1,0] 就是假的
-        :param llm_embedding: spk embedding, [1, 192]
+        :param prompt_text: [1,0] 就是假的, 在zero_shot中是[B,T_prompt_text=16]
+        :param llm_prompt_speech_token: [1,0] 就是假的, 在zero_shot中是[B,T_prompt_speech_token=174]
+        :param llm_embedding: target spk embedding, [1, 192]
         :param uuid: str
         """
         cur_silent_token_num, max_silent_token_num = 0, 5
@@ -157,19 +157,19 @@ class CosyVoiceModel:
                                                                   [llm_prompt_speech_token.size(1)], dtype=torch.int).to(self.device),
                                                               embedding=llm_embedding.to(self.device),)
             else:
-                token_generator = self.llm.inference(text=text.to(self.device),  # [1,T_text]
+                token_generator = self.llm.inference(text=text.to(self.device),  # [1,T_text], target text
                                                      text_len=torch.tensor(
                                                          [text.size(1)], dtype=torch.int).to(self.device),  # [1]=T_text
                                                      prompt_text=prompt_text.to(
-                                                         self.device),
+                                                         self.device),  # [B,T_prompt_text=16], prompt text
                                                      prompt_text_len=torch.tensor(prompt_text.size(
                                                          1), dtype=torch.int).to(self.device),
                                                      prompt_speech_token=llm_prompt_speech_token.to(
-                                                         self.device),
+                                                         self.device),  # [B,T_prompt_speech_token=174]
                                                      prompt_speech_token_len=torch.tensor(
                                                          [llm_prompt_speech_token.size(1)], dtype=torch.int).to(self.device),
                                                      embedding=llm_embedding.to(
-                                                         self.device),  # [1,192]
+                                                         self.device),  # [1,192], target spk embedding
                                                      uuid=uuid)
             for i in token_generator:
                 if i in self.silent_tokens:
@@ -295,12 +295,12 @@ class CosyVoiceModel:
         """tts main entry point
 
         :param text: target generated text from whisper tokenizer, shape=[1, T_text], dtype=int(know as int32)
-        :param flow_embedding: spk embedding from cam++, shape=[1,192], dtype=float32
-        :param llm_embedding: spk embedding from cam++, shape=[1,192], dtype=float32
-        :param prompt_text: 说明
-        :param llm_prompt_speech_token: 说明
-        :param flow_prompt_speech_token: 说明
-        :param prompt_speech_feat: 说明
+        :param flow_embedding: spk embedding from cam++, shape=[1,192], dtype=float32, target  spk embedding for flow
+        :param llm_embedding: spk embedding from cam++, shape=[1,192], dtype=float32, target  spk embedding for llm
+        :param prompt_text: prompt text token from whisper tokenizer, shape=[1, T_prompt_text], dtype=int
+        :param llm_prompt_speech_token: prompt speech token from speech_tokenizer_v1.onnx, shape=[B,T_prompt_speech_token=174], dtype=int
+        :param flow_prompt_speech_token: prompt speech token from speech_tokenizer_v1.onnx, shape=[B,T_prompt_speech_token=174], dtype=int
+        :param prompt_speech_feat: prompt speech mel_spec, shape=[B,T_prompt_speech_feat=326,D=80], dtype=float
         :param source_speech_token: 说明
         :param stream: True for streaming inference
         :param speed: output speech speed

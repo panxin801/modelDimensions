@@ -210,11 +210,11 @@ class TransformerLM(nn.Module):
 
         :param text: target text token, [1, T_text]
         :param text_len: [1]=T_text
-        :param prompt_text: [1,0] is fake
-        :param prompt_text_len: [1]=0 is fake
-        :param prompt_speech_token: [1,0] is fake
-        :param prompt_speech_token_len: [1]=0 is fake
-        :param embedding: spk embedding, [1,192]
+        :param prompt_text: [1,0] is fake. [B,T_prompt_text=16]
+        :param prompt_text_len: [1]=0 is fake. [B]
+        :param prompt_speech_token: [1,0] is fake. [B,T_prompt_speech_token=174]
+        :param prompt_speech_token_len: [1]=0 is fake. [B]
+        :param embedding: target spk embedding, [1,192]
         :param sampling: 采样用的参数
         :param max_token_text_ratio: 最高llm 产生token数量
         :param min_token_text_ratio: 最低llm 产生token数量
@@ -224,15 +224,15 @@ class TransformerLM(nn.Module):
             Generator[]
         """
         device = text.device
-        # [1, T_prompt+T_text], 拼接了prompt_text and target text
+        # [1, T_prompt_text+T_text], 拼接了prompt_text and target text
         text = torch.concat([prompt_text, text], dim=1)
         text_len += prompt_text_len
         # [ 1, T_text, 512], text token -> text embedding
         text = self.text_embedding(text)
 
         # 1. encode text, from text embedding space to llm space,
-        # difference is llm space contains text  token and speech token
-        # [1,T_text, 1024], [1]=T_text
+        # difference is llm space contains text token and speech token
+        # [1, T_text, 1024], [1]=T_text
         text, text_len = self.encode(text, text_len)
 
         # 2. encode embedding
@@ -251,13 +251,14 @@ class TransformerLM(nn.Module):
             1, 1, -1)  # from [1024] -> [1,1,1024]
         if prompt_speech_token_len != 0:
             prompt_speech_token_emb = self.speech_embedding(
-                prompt_speech_token)
+                prompt_speech_token)  # [B, T_prompt_speech_token, 1024], speech token -> speech_embedding
         else:
             prompt_speech_token_emb = torch.zeros(
                 1, 0, self.llm_input_size, dtype=text.dtype).to(device)  # [1,0,1024] is fake
         lm_input = torch.concat(
             [sos_emb, embedding, text, task_id_emb, prompt_speech_token_emb], dim=1)
         # inference_sft: [1,36,1024], 36=1+1+33+1+0
+        # zero_shot: [1,256,1024], 258=1+1+81+1+174
 
         # 4. cal min/max_length
         min_len = int((text_len - prompt_text_len)

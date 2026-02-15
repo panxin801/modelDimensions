@@ -134,18 +134,29 @@ class CosyVoice:
                             stream=False,
                             speed=1.0,
                             text_frontend=True):
+        """
+        inference_zero_shot  zero shot tts inference
+
+        :param tts_text: 待合成文本, str
+        :param prompt_text: prompt文本, str
+        :param prompt_wav: prompt音频, file path
+        :param zero_shot_spk_id: 
+        :param stream: 是否流式
+        :param speed: 语速
+        :param text_frontend: 是否使用文本正则
+        """
         if self.__class__.__name__ == "CosyVoice3" and "<|endofprompt|>" not in prompt_text + tts_text:
             logging.warning(
                 "<|endofprompt|> not found in CosyVoice3 inference, check your input text")
         prompt_text = self.frontend.text_normalize(
-            prompt_text, split=False, text_frontend=text_frontend)
+            prompt_text, split=False, text_frontend=text_frontend)  # str
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend)):
             if (not isinstance(i, Generator)) and len(i) < 0.5 * len(prompt_text):
                 logging.warning(
                     f"synthesis text {i} too short than prompt text {prompt_text}, this may lead to bad performance")
             model_input = self.frontend.frontend_zero_shot(i, prompt_text,
                                                            prompt_wav,
-                                                           self.sample_rate,
+                                                           self.sample_rate,  # 22050
                                                            zero_shot_spk_id)
             start_time = time.time()
             logging.info(f"synthesis text {i}")
