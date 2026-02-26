@@ -218,6 +218,7 @@ class CosyVoiceFrontEnd:
         tts_text_token, tts_text_token_len = self._extract_text_token(
             tts_text)  # target text chars to text tokens, [B, T_text]
         if zero_shot_spk_id == "":
+            # cross lingual时 prompt_text为空
             prompt_text_token, prompt_text_token_len = self._extract_text_token(
                 prompt_text)
             speech_feat, speech_feat_len = self._extract_speech_feat(
