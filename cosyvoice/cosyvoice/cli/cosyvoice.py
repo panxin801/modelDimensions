@@ -209,7 +209,7 @@ class CosyVoice:
     def inference_instruct(self,
                            tts_text,
                            spk_id,
-                           instruct_text,
+                           instruct_text,  # 相当于prompt_text。如果把这个内容改了，结果值得思考。
                            stream=False,
                            speed=1.0,
                            text_frontend=True):
@@ -219,6 +219,7 @@ class CosyVoice:
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend)):
             model_input = self.frontend.frontend_instruct(
                 i, spk_id, instruct_text)
+            # model_input=dict_keys(['text', 'text_len', 'flow_embedding', 'prompt_text', 'prompt_text_len']), prompt_text from instruct_text
             start_time = time.time()
             logging.info(f"synthesis text {i}")
             for model_output in self.model.tts(**model_input, stream=stream, speed=speed):

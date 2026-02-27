@@ -185,7 +185,7 @@ class CosyVoiceModel:
                source_speech_token,
                uuid):
         self.tts_speech_token_dict[uuid] = source_speech_token.flatten(
-        ).tolist()
+        ).tolist()  # tensor to list, [B,T_token] -> len=B*T_token
         self.llm_end_dict[uuid] = True
 
     def token2wav(self,
@@ -206,6 +206,8 @@ class CosyVoiceModel:
         :param speed: 语速
         Return: 
             speech waveform
+        """
+        """ Instruct 场景中，prompt_token是空的，prompt_feat是空的 
         """
         with torch.autocast("cuda", enabled=self.fp16):
             tts_mel, self.flow_cache_dict[uuid] = self.flow.inference(token=token.to(self.device, dtype=torch.int),
@@ -301,7 +303,7 @@ class CosyVoiceModel:
         :param llm_prompt_speech_token: prompt speech token from speech_tokenizer_v1.onnx, shape=[B,T_prompt_speech_token=174], dtype=int
         :param flow_prompt_speech_token: prompt speech token from speech_tokenizer_v1.onnx, shape=[B,T_prompt_speech_token=174], dtype=int
         :param prompt_speech_feat: prompt speech mel_spec, shape=[B,T_prompt_speech_feat=326,D=80], dtype=float
-        :param source_speech_token: 说明
+        :param source_speech_token: source speech token from source speech(content speech) using in vc,shape=[B,T_source_speech_token], In vc task source is content speech, prompt is spk speech
         :param stream: True for streaming inference
         :param speed: output speech speed
         :param kwargs: 说明

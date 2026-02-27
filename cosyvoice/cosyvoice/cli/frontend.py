@@ -287,7 +287,7 @@ class CosyVoiceFrontEnd:
                        "flow_prompt_speech_token_len": prompt_speech_token_len,
                        "prompt_speech_feat": prompt_speech_feat,
                        "prompt_speech_feat_len": prompt_speech_feat_len,
-                       "flow_embedding": embedding}
+                       "flow_embedding": embedding}  # from prompt wav
         return model_input
 
     def frontend_instruct(self, tts_text, spk_id, instruct_text):

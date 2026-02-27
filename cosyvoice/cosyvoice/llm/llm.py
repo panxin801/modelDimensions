@@ -260,6 +260,7 @@ class TransformerLM(nn.Module):
         # inference_sft: [1,36,1024], 36=1+1+33+1+0
         # zero_shot: [1,256,1024], 258=1+1+81+1+174
         # cross lingual zero shot: 1+1+T_text+1+0, prompt_text is None, prompt_speech_token is none.
+        # instruct: 1+0+T_text+1+0, embedding is None, prompt_speech_token is none.
 
         # 4. cal min/max_length
         min_len = int((text_len - prompt_text_len)
