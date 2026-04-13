@@ -21,10 +21,8 @@ from hyperpyyaml import load_hyperpyyaml
 from modelscope import snapshot_download
 
 from cosyvoice.cli.frontend import CosyVoiceFrontEnd
-# from cosyvoice.cli.model import (
-#     CosyVoiceModel, CosyVoice2Model, CosyVoice3Model)
 from cosyvoice.cli.model import (
-    CosyVoiceModel,)
+    CosyVoiceModel, CosyVoice2Model, CosyVoice3Model)
 from cosyvoice.utils.file_utils import (logging)
 from cosyvoice.utils.class_utils import (get_model_type)
 
@@ -140,7 +138,7 @@ class CosyVoice:
         :param tts_text: 待合成文本, str
         :param prompt_text: prompt文本, str
         :param prompt_wav: prompt音频, file path
-        :param zero_shot_spk_id: 
+        :param zero_shot_spk_id:
         :param stream: 是否流式
         :param speed: 语速
         :param text_frontend: 是否使用文本正则
@@ -231,14 +229,130 @@ class CosyVoice:
                 start_time = time.time()
 
 
+class CosyVoice2(CosyVoice):
+    def __init__(self, model_dir, load_jit=False, load_trt=False, load_vllm=False, fp16=False, trt_concurrent=1):
+        self.model_dir = model_dir
+        self.fp16 = fp16
+
+        if not os.path.exists(model_dir):
+            model_dir = snapshot_download(model_dir)
+
+        hyper_yaml_path = f"{model_dir}/cosyvoice2.yaml"
+        if not os.path.exists(hyper_yaml_path):
+            raise ValueError(f"{hyper_yaml_path} not found!")
+        with open(hyper_yaml_path, "rt", encoding="utf8") as fr:
+            configs = load_hyperpyyaml(fr, overrides={
+                                       "qwen_pretrain_path": os.path.join(model_dir, "CosyVoice-BlankEN")})
+        assert get_model_type(
+            configs) == CosyVoice2Model, f"do not use {model_dir} for CosyVoice2 initialization!"
+        self.frontend = CosyVoiceFrontEnd(configs["get_tokenizer"],
+                                          configs["feat_extractor"],
+                                          f"{model_dir}/capplus.onnx",
+                                          f"{model_dir}/speech_tokenizer_v2.onnx",
+                                          f"{model_dir}/spk2info.pt",
+                                          configs["allowed_special"])
+        self.sample_rate = configs["sample_rate"]
+        if torch.cuda.is_available() is False and (load_jit is True or load_trt is True or load_vllm is True or fp16 is True):
+            load_jit, load_trt, load_vllm, fp16 = False, False, False, False
+            logging.warning(
+                "no cuda device, set load_jit/load_trt/load_vllm/fp16 to False")
+        self.model = CovyVoice2Model(configs["llm"],
+                                     configs["flow"],
+                                     configs["hift"],
+                                     fp16)
+        self.model.load(f"{model_dir}/llm.pt",
+                        f"{model_dir}/flow.pt",
+                        f"{model_dir}/hift.pt")
+        if load_vllm:
+            self.model.load_vllm(f"{model_dir}/vllm")
+        if load_jit:
+            self.model.load_jit(
+                f"{model_dir}/flow.encoder.{'fp16' if self.fp16 is True else 'fp32'}")
+        if load_trt:
+            self.model.load_trt(
+                f"{model_dir}/flow.decoder.estimator.{('fp16' if self.fp16 is True else 'fp32')}.mygpu.plan",
+                f"{model_dir}/flow.decoder.estimator.fp32.onnx",
+                trt_concurrent,
+                self.fp16)
+        del configs
+
+    def inference_instruct2(self,
+                            tts_text,
+                            instruct_text,
+                            prompt_wav,
+                            zero_shot_spk_id="",
+                            stream=False,
+                            speed=1.0,
+                            text_frontend=True):
+        for i in tqdm(self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend)):
+            model_input = self.frontend.frontend_instruct2(
+                i, instruct_text, prompt_wav, self.sample_rate, zero_shot_spk_id)
+            start_time = time.time()
+            logging.info(f"synthesis text {i}")
+            for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
+                speech_len = model_output["tts_speech"].size(
+                    1) / self.sample_rate
+                logging.info(
+                    f"yield speech len {speech_len}, rtf {(time.time() - start_time) / speech_len}")
+                yield model_output
+                start_time = time.time()
+
+
+class CosyVoice3(CosyVoice2):
+    def __init__(self, model_dir, load_trt=False, load_vllm=False, fp16=False, trt_concurrent=1):
+        self.model_dir = model_dir
+        self.fp16 = fp16
+
+        if not os.path.exists(model_dir):
+            model_dir = snapshot_download(model_dir)
+
+        hyper_yaml_path = f"{model_dir}/cosyvoice3.yaml"
+        if not os.path.exists(hyper_yaml_path):
+            raise ValueError(f"{hyper_yaml_path} not found!")
+        with open(hyper_yaml_path, "rt", encoding="utf8") as fr:
+            configs = load_hyperpyyaml(fr, overrides={
+                "qwen_pretrain_path": os.path.join(model_dir, "CosyVoice-BlankEN")})
+        assert get_model_type(
+            configs) == CosyVoice3Model, f"do not use {model_dir} for CosyVoice3 initialization!"
+        self.frontend = CosyVoiceFrontEnd(configs["get_tokenizer"],
+                                          configs["feat_extractor"],
+                                          f"{model_dir}/campplus.onnx",
+                                          f"{model_dir}/speech_tokenizer_v3.onnx",
+                                          f"{model_dir}/spk2info.pt",
+                                          configs["allowed_special"])
+        self.sample_rate = configs["sample_rate"]  # 24000
+        if torch.cuda.is_available() is False and (load_trt is True or fp16 is True):
+            load_trt, fp16 = False, False
+            logging.warning("no cuda device, set load_trt/fp16 to False")
+        self.model = CosyVoice3Model(configs["llm"],
+                                     configs["flow"],
+                                     configs["hift"],
+                                     fp16)
+        self.model.load(f"{model_dir}/llm.pt",
+                        f"{model_dir}/flow.pt",
+                        f"{model_dir}/hift.pt")
+        if load_vllm:
+            self.model.load_vllm(f"{model_dir}/vllm")
+        if load_trt:
+            if self.fp16 is True:
+                logging.warning(
+                    "DiT tensorRT fp16 engine have some performance issue, use at caution!")
+            self.model.load_trt(
+                f"{model_dir}/flow.decoder.estimator.{'fp16' if self.fp16 is True else 'fp32'}.mygpu.plan",
+                f"{model_dir}/flow.decoder.estimator.fp32.onnx",
+                trt_concurrent,
+                self.fp16)
+        del configs
+
+
 def AutoModel(**kwargs):
     if not os.path.exists(kwargs["model_dir"]):
         kwargs["model_dir"] = snapshot_download(kwargs["model_dir"])
     if os.path.exists(f"{kwargs['model_dir']}/cosyvoice.yaml"):
         return CosyVoice(**kwargs)
     elif os.path.exists(f"{kwargs['model_dir']}/cosyvoice2.yaml"):
-        return CosyVoice2Model(**kwargs)
+        return CosyVoice2(**kwargs)
     elif os.path.exists(f"{kwargs['model_dir']}/cosyvoice3.yaml"):
-        return CosyVoice3Model(**kwargs)
+        return CosyVoice3(**kwargs)
     else:
         raise TypeError("No valid model type found.")
