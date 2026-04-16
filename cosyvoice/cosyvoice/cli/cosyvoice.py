@@ -247,7 +247,7 @@ class CosyVoice2(CosyVoice):
             configs) == CosyVoice2Model, f"do not use {model_dir} for CosyVoice2 initialization!"
         self.frontend = CosyVoiceFrontEnd(configs["get_tokenizer"],
                                           configs["feat_extractor"],
-                                          f"{model_dir}/capplus.onnx",
+                                          f"{model_dir}/campplus.onnx",
                                           f"{model_dir}/speech_tokenizer_v2.onnx",
                                           f"{model_dir}/spk2info.pt",
                                           configs["allowed_special"])
@@ -256,7 +256,7 @@ class CosyVoice2(CosyVoice):
             load_jit, load_trt, load_vllm, fp16 = False, False, False, False
             logging.warning(
                 "no cuda device, set load_jit/load_trt/load_vllm/fp16 to False")
-        self.model = CovyVoice2Model(configs["llm"],
+        self.model = CosyVoice2Model(configs["llm"],
                                      configs["flow"],
                                      configs["hift"],
                                      fp16)

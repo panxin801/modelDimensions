@@ -778,8 +778,11 @@ class CausalHiFTGenerator(HiFTGenerator):
 if __name__ == '__main__':
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    import sys
     from hyperpyyaml import load_hyperpyyaml
-    with open('./pretrained_models/Fun-CosyVoice3-0.5B/cosyvoice3.yaml', 'r') as f:
+    # sys.path.append("third_party/Matcha-TTS")
+
+    with open('/data/cosyvoicePretrainModels/pretrained_models/Fun-CosyVoice3-0.5B/cosyvoice3.yaml', 'r') as f:
         configs = load_hyperpyyaml(f, overrides={'llm': None, 'flow': None})
     model = configs['hift']
     device = 'cuda' if torch.cuda.is_available() else 'cpu'

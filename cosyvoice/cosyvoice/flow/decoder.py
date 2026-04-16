@@ -96,7 +96,7 @@ class CausalResnetBlock1D(ResnetBlock1D):
                  dim: int,
                  dim_out: int,
                  time_emb_dim: int,
-                 groups: int = 0):
+                 groups: int = 8):
         super().__init__(dim, dim_out, time_emb_dim, groups)
         self.block1 = CausalBlock1D(dim, dim_out)
         self.block2 = CausalBlock1D(dim_out, dim_out)
@@ -536,7 +536,7 @@ class CausalConditionalDecoder(ConditionalDecoder):
                 x = transformer_block(hidden_states=x,
                                       attention_mask=attn_mask,
                                       timestep=t)
-                x = rearrange(x, "b t c -> b c t").contiguous()
+            x = rearrange(x, "b t c -> b c t").contiguous()
             hiddens.append(x)  # Save hidden states for skip connections
             x = downsample(x * mask_down)
             masks.append(mask_down[:, :, ::2])

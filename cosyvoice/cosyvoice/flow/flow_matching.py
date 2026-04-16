@@ -231,3 +231,51 @@ class ConditionalCFM(BASECFM):
                           reduction="sum") / (torch.sum(mask) * u.size(1))
 
         return loss, y
+
+
+class CausalConditionalCFM(ConditionalCFM):
+    def __init__(self,
+                 in_channels,
+                 cfm_params,
+                 n_spks=1,
+                 spk_emb_dim=64,
+                 estimator: nn.Module = None,):
+        super().__init__(in_channels, cfm_params, n_spks, spk_emb_dim, estimator)
+        set_all_random_seed(0)
+        self.rand_noise = torch.randn([1, 80, 50 * 300])
+
+    @torch.inference_mode()
+    def forward(self,
+                mu,
+                mask,
+                n_timesteps,
+                temperature=1.0,
+                spks=None,
+                cond=None,
+                streaming=False):
+        """Forward diffusion
+
+        Args:
+            mu (torch.Tensor): output of encoder
+                shape: (batch_size, n_feats, mel_timesteps)
+            mask (torch.Tensor): output_mask
+                shape: (batch_size, 1, mel_timesteps)
+            n_timesteps (int): number of diffusion steps
+            temperature (float, optional): temperature for scaling noise. Defaults to 1.0.
+            spks (torch.Tensor, optional): speaker ids. Defaults to None.
+                shape: (batch_size, spk_emb_dim)
+            cond: Not used but kept for future purposes
+
+        Returns:
+            sample: generated mel-spectrogram
+                shape: (batch_size, n_feats, mel_timesteps)
+        """
+
+        z = self.rand_noise[:, :, :mu.size(2)].to(
+            mu.device).to(mu.dtype) * temperature
+        # fix prompt and overlap part mu and z
+        t_span = torch.linspace(0, 1, n_timesteps + 1,
+                                device=mu.device, dtype=mu.dtype)
+        if self.t_scheduler == "cosine":
+            t_span = 1 - torch.cos(t_span * 0.5 * torch.pi)
+        return self.solve_euler(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond, streaming=streaming), None
