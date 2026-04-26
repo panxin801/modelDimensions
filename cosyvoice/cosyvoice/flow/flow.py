@@ -382,7 +382,7 @@ class CausalMaskedDiffWithDiT(nn.Module):
         self.pre_lookahead_layer = pre_lookahead_layer
         self.decoder = decoder
         self.only_mask_loss = only_mask_loss
-        self.token_mel_ratio = token_mel_ratio
+        self.token_mel_ratio = token_mel_ratio  # 2
         if online_feature is True:
             self.speech_token_extractor = SpeechTokenExtractor(
                 model_path=os.path.join(onnx_path, "speech_tokenizer_v3.batch.onnx"))
@@ -438,50 +438,54 @@ class CausalMaskedDiffWithDiT(nn.Module):
 
     @torch.inference_mode()
     def inference(self,
-                  token,
+                  token,  # LLM generated token, [B, T_generated_token=210]
                   token_len,
+                  # prompt speech token, [B, T_prompt_speech_token=87]
                   prompt_token,
                   prompt_token_len,
-                  prompt_feat,
+                  prompt_feat,  # prompt mel spec, [B, T_prompt_mel=174, D=80]
                   prompt_feat_len,
-                  embedding,
+                  embedding,  # spk embedding, [B, D=192]
                   streaming,
                   finalize):
         assert token.shape[0] == 1
         # xvec projection
-        embedding = F.normalize(embedding, 1)
-        embedding = self.spk_embed_affine_layer(embedding)
+        embedding = F.normalize(embedding, 1)  # [B, 192]
+        embedding = self.spk_embed_affine_layer(embedding)  # [B, 80]
 
         # concat text and prompt_text
         token, token_len = torch.concat(
-            [prompt_token, token], 1), prompt_token_len + token_len
-        mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-        token = self.input_embedding(torch.clamp(token, 0)) * mask
+            [prompt_token, token], 1), prompt_token_len + token_len  # [B, T_token=T_prompt_speech_token+T_generated_token=297]
+        mask = (~make_pad_mask(token_len)
+                ).unsqueeze(-1).to(embedding)  # [B, T_token, 1]
+        token = self.input_embedding(torch.clamp(
+            token, 0)) * mask  # [B, T_token, 80]
 
         # text encode
         if finalize is True:
-            h = self.pre_lookahead_layer(token)
+            h = self.pre_lookahead_layer(token)  # [B, T_token, 80]
         else:
             h = self.pre_lookahead_layer(
                 token[:, :-self.pre_lookahead_len], context=token[:, -self.pre_lookahead_len:])
-        h = h.repeat_interleave(self.token_mel_ratio, 1)
+        h = h.repeat_interleave(self.token_mel_ratio, 1)  # [B, 2*T_token, 80]
         mel_len1, mel_len2 = prompt_feat.size(
-            1), h.size(1) - prompt_feat.size(1)
+            1), h.size(1) - prompt_feat.size(1)  # T_prompt_mel, 2*T_token-T_prompt_mel
 
         # get conditions
         conds = torch.zeros(
-            [1, mel_len1 + mel_len2, self.output_size], device=token.device, dtype=h.dtype)
+            [1, mel_len1 + mel_len2, self.output_size], device=token.device, dtype=h.dtype)  # [B, 2*T_token, 80]
         conds[:, :mel_len1] = prompt_feat
-        conds = conds.transpose(1, 2)
+        conds = conds.transpose(1, 2)  # [B, 80, 2*T_token]
 
+        # [B, 2*T_token]
         mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2]))).to(h)
-        feat, _ = self.decoder(mu=h.transpose(1, 2).contiguous(),
+        feat, _ = self.decoder(mu=h.transpose(1, 2).contiguous(),  # semantic token hidden state [B, 80, 2*T_token]
                                mask=mask.unsqueeze(1),
-                               spks=embedding,
-                               cond=conds,
+                               spks=embedding,  # [B, 80]
+                               cond=conds,  # [B, 80, 2*T_token], mel spec
                                n_timesteps=10,
-                               streaming=streaming)
-        feat = feat[:, :, mel_len1:]
+                               streaming=streaming)  # [B, 80, 2*T_token=594]
+        feat = feat[:, :, mel_len1:]  # [B, 80, mel_len2]
         assert feat.size(2) == mel_len2
         return feat.float(), None
 

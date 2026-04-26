@@ -246,17 +246,17 @@ class CausalConditionalCFM(ConditionalCFM):
 
     @torch.inference_mode()
     def forward(self,
-                mu,
-                mask,
+                mu,  # semantic token in hidden state, [B, 80, 2*T_token=594]
+                mask,  # [B, 1, 2*T_token=594]
                 n_timesteps,
                 temperature=1.0,
-                spks=None,
-                cond=None,
+                spks=None,  # spk embedding, [B, 80]
+                cond=None,  # mel spec, [B, 80, 2*T_token=594]
                 streaming=False):
         """Forward diffusion
 
         Args:
-            mu (torch.Tensor): output of encoder
+            mu (torch.Tensor): output of encoder, semantic token in hidden state
                 shape: (batch_size, n_feats, mel_timesteps)
             mask (torch.Tensor): output_mask
                 shape: (batch_size, 1, mel_timesteps)
@@ -272,10 +272,10 @@ class CausalConditionalCFM(ConditionalCFM):
         """
 
         z = self.rand_noise[:, :, :mu.size(2)].to(
-            mu.device).to(mu.dtype) * temperature
+            mu.device).to(mu.dtype) * temperature  # [B, 80, 2*T_token=594]
         # fix prompt and overlap part mu and z
         t_span = torch.linspace(0, 1, n_timesteps + 1,
-                                device=mu.device, dtype=mu.dtype)
+                                device=mu.device, dtype=mu.dtype)  # [1]=11
         if self.t_scheduler == "cosine":
             t_span = 1 - torch.cos(t_span * 0.5 * torch.pi)
         return self.solve_euler(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond, streaming=streaming), None

@@ -339,7 +339,11 @@ class Qwen2Encoder(nn.Module):
         return outs.hidden_states[-1], masks.unsqueeze(1)
 
     def forward_one_step(self, xs, masks, cache=None):
-        input_masks = masks[:, -1, :]
+        """ xs: lm_input, token embeddings, [B, T_token=143, D=896] for the first time, [B, 1, 896] later
+        masks: [1, T_token, T_token=143] for the first time, [B, 1, 896] later
+        cache: None at first time, then cache=DynamicCache
+        """
+        input_masks = masks[:, -1, :]  # [1, T_token]
         outs = self.model(
             inputs_embeds=xs,
             attention_mask=input_masks,
@@ -347,7 +351,7 @@ class Qwen2Encoder(nn.Module):
             return_dict=True,
             use_cache=True,
             past_key_values=cache)
-        xs = outs.hidden_states[-1]
+        xs = outs.hidden_states[-1]  # [B, T_token, D=896]
         new_cache = outs.past_key_values
         return xs, new_cache
 
@@ -622,20 +626,24 @@ class Qwen2LM(TransformerLM):
 
     @torch.inference_mode()
     def inference(self,
-                  text: torch.Tensor,
+                  text: torch.Tensor,  # int, [B, T_text_token=32]
                   text_len: torch.Tensor,
+                  # int, [B, T_prompt_text_token=22]
                   prompt_text: torch.Tensor,
                   prompt_text_len: torch.Tensor,
+                  # int, [B, T_prompt_speech_token=87]
                   prompt_speech_token: torch.Tensor,
                   prompt_speech_token_len: torch.Tensor,
-                  embedding: torch.Tensor,
+                  embedding: torch.Tensor,  # [B, D=192]
                   sampling: int = 25,
                   max_token_text_ratio: float = 20,
                   min_token_text_ratio: float = 2,
                   uuid: str = "",) -> Generator[torch.Tensor, None, None]:
         device = text.device
+        # [B, T_text_token+T_prompt_text_token=54]
         text = torch.concat([prompt_text, text], 1)
         text_len += prompt_text_len
+        # [B, T_text_token=54, 896], text token to text token embedding
         text_emb = self.llm.model.model.embed_tokens(text)
         if self.__class__.__name__ == "CosyVoice3LM":
             # NOTE temporary hardcode, 151646 is <|endofprompt|> token
@@ -643,9 +651,10 @@ class Qwen2LM(TransformerLM):
 
         # 3. concat llm_input
         if self.__class__.__name__ == "CosyVoice3LM":
-            sos_emb = self.speech_embedding.weight[self.sos].reshape(1, 1, -1)
+            sos_emb = self.speech_embedding.weight[self.sos].reshape(
+                1, 1, -1)  # sos=6561, [1,1,896]
             task_id_emb = self.speech_embedding.weight[self.task_id].reshape(
-                1, 1, -1)
+                1, 1, -1)  # task_id=6563, [1,1,896]
         elif self.__class__.__name__ == "Qwen2LM":
             sos_emb = self.llm_embedding.weight[self.sos].reshape(1, 1, -1)
             task_id_emb = self.llm_embedding.weight[self.task_id].reshape(
@@ -654,12 +663,12 @@ class Qwen2LM(TransformerLM):
             raise ValueError
         if prompt_speech_token_len != 0:
             prompt_speech_token_emb = self.speech_embedding(
-                prompt_speech_token)
+                prompt_speech_token)  # [B, T_prompt_speech_token=87, 896], speech token to speech token embedding
         else:
             prompt_speech_token_emb = torch.zeros(
                 1, 0, self.llm_input_size, dtype=text_emb.dtype, device=device)
         lm_input = torch.concat(
-            [sos_emb, text_emb, task_id_emb, prompt_speech_token_emb], 1)
+            [sos_emb, text_emb, task_id_emb, prompt_speech_token_emb], 1)  # [B, 1+T_text_token+1+T_prompt_speech_token+1=143,896]
 
         # 4. cal min/max_length
         min_len = int((text_len - prompt_text_len) * min_token_text_ratio)
@@ -671,10 +680,10 @@ class Qwen2LM(TransformerLM):
 
     @torch.inference_mode()
     def inference_wrapper(self,
-                          lm_input,
+                          lm_input,  # [B, T_token=143,=896]
                           sampling,
-                          min_len,
-                          max_len,
+                          min_len,  # 64
+                          max_len,  # 640
                           uuid):
         if hasattr(self, "vllm"):
             from vllm import (SamplingParams, RequestOutput)
@@ -712,22 +721,25 @@ class Qwen2LM(TransformerLM):
             out_tokens = []
             cache = None
             for i in range(max_len):
-                y_pred, cache = self.llm.forward_one_step(lm_input,
+                y_pred, cache = self.llm.forward_one_step(lm_input,  # [B, T_token=143,D=896] for the first time, then [B, 1, 896]
                                                           masks=torch.tril(torch.ones(1, lm_input.size(1), lm_input.size(
-                                                              1), device=lm_input.device)).to(torch.bool),
+                                                              1), device=lm_input.device)).to(torch.bool),  # [1, T_token, T_token=143] at first time, then T_token=1
                                                           cache=cache)
-                logp = self.llm_decoder(y_pred[:, -1]).log_softmax(-1)
+                # y_pred=[B, T_token=143, D=896], len(cache.key_cache)=24, len(cache.value_cache)=24 at first time, then
+                # y_pred=[B, T_token=1, D=896], len(cache.key_cache)=24, len(cache.value_cache)=24
+                logp = self.llm_decoder(
+                    y_pred[:, -1]).log_softmax(-1)  # [B, 6761]
                 top_ids = self.sampling_ids(logp.squeeze(0),
                                             out_tokens,
                                             sampling,
-                                            ignore_eos=True if i < min_len else False)
+                                            ignore_eos=True if i < min_len else False)  # one int id
                 if top_ids in self.stop_token_ids:
                     break
                 # in stream mode, yield token one by one
                 yield top_ids
                 out_tokens.append(top_ids)
                 lm_input = self.speech_embedding.weight[top_ids].reshape(
-                    1, 1, -1)
+                    1, 1, -1)  # [1, 1, 896]
 
     @torch.inference_mode()
     def inference_bistream(

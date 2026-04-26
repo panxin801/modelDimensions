@@ -314,20 +314,22 @@ class CosyVoice3(CosyVoice2):
                 "qwen_pretrain_path": os.path.join(model_dir, "CosyVoice-BlankEN")})
         assert get_model_type(
             configs) == CosyVoice3Model, f"do not use {model_dir} for CosyVoice3 initialization!"
-        self.frontend = CosyVoiceFrontEnd(configs["get_tokenizer"],
+        self.frontend = CosyVoiceFrontEnd(configs["get_tokenizer"],  # Fun-CosyVoice3-0.5B/CosyVoice-BlankEN
+                                          # mel_spectrogram
                                           configs["feat_extractor"],
                                           f"{model_dir}/campplus.onnx",
                                           f"{model_dir}/speech_tokenizer_v3.onnx",
                                           f"{model_dir}/spk2info.pt",
-                                          configs["allowed_special"])
+                                          configs["allowed_special"])  # all
         self.sample_rate = configs["sample_rate"]  # 24000
         if torch.cuda.is_available() is False and (load_trt is True or fp16 is True):
             load_trt, fp16 = False, False
             logging.warning("no cuda device, set load_trt/fp16 to False")
-        self.model = CosyVoice3Model(configs["llm"],
+        self.model = CosyVoice3Model(configs["llm"],  # CosyVoice3LM
+                                     # CausalMaskedDiffWithDiT
                                      configs["flow"],
-                                     configs["hift"],
-                                     fp16)
+                                     configs["hift"],  # CausalHiFTGenerator
+                                     fp16)  # False
         self.model.load(f"{model_dir}/llm.pt",
                         f"{model_dir}/flow.pt",
                         f"{model_dir}/hift.pt")
